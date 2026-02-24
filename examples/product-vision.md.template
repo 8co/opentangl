@@ -1,0 +1,54 @@
+# Product Vision — {Product Name}
+
+> **This file drives the autopilot.** The Origin section is your north star — OpenTangl reads it but never edits it. The Current Priorities section is updated automatically after each run to reflect progress and plan the next wave of work.
+
+---
+
+## Origin & Direction
+
+_Human-authored. OpenTangl will never modify this section._
+
+### What This Is
+
+{Describe your project in 2-3 sentences. What does it do? Who is it for? What problem does it solve?}
+
+### Where It's Going
+
+{Describe the long-term direction. What does the finished product look like? What capabilities should it have? Think 6-12 months out.}
+
+### What Matters Most
+
+{List 3-5 principles that guide development decisions. Examples:}
+
+1. {e.g., User experience over feature count — every feature must be polished}
+2. {e.g., API-first — every UI feature has a proper API endpoint behind it}
+3. {e.g., Test coverage on critical paths — auth, payments, data integrity}
+4. {e.g., Performance — pages load in under 2 seconds}
+5. {e.g., Accessibility — WCAG 2.1 AA compliance}
+
+---
+
+## Current Priorities
+
+_Updated automatically by OpenTangl after each run. Priorities must trace back to the Origin section above._
+
+_Last updated: {date}_
+
+### Active Initiatives
+
+1. **{First priority}** — {What needs to happen and why}
+   - Status: not started
+2. **{Second priority}** — {What needs to happen and why}
+   - Status: not started
+3. **{Third priority}** — {What needs to happen and why}
+   - Status: not started
+
+### Completed (Recent)
+
+_Nothing yet — OpenTangl will populate this after the first run._
+
+### Guiding Constraints
+
+- {e.g., Cross-project features must land API-first, then UI.}
+- {e.g., Do not modify auth or payment infrastructure without human approval.}
+- {e.g., Avoid proposing features that duplicate existing capabilities.}

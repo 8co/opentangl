@@ -1,0 +1,109 @@
+# projects.yaml — Project Configuration
+#
+# Define the projects the orchestrator manages. Each entry describes a codebase
+# the orchestrator can scan, propose tasks for, and submit PRs to.
+#
+# Minimal setup requires: id, name, path, type, scan_dirs.
+# Everything else has sensible defaults or is optional.
+
+projects:
+  # --- Single project example ---
+
+  - id: my-app                          # Unique ID used in CLI flags (--projects my-app)
+    name: my-app                        # Human-readable name (usually matches the repo)
+    path: ../my-app                     # Path relative to the orchestrator root
+    type: react-vite                    # Project type (see supported types below)
+    description: React dashboard app    # One-line description for LLM context
+    scan_dirs:
+      - src                             # Directories containing source code to scan
+    skip_patterns:                      # Patterns to exclude from scanning (optional)
+      - node_modules
+      - dist
+      - "*.test.*"
+    verify:                             # Commands that must pass before code is committed (optional)
+      - command: npm
+        args: [run, build]
+      - command: npm
+        args: [test]
+    package_manager: npm                # npm | yarn | pnpm
+
+  # --- Multi-project example (API + Frontend) ---
+  # Group related projects under the same `environment` to share a product vision.
+
+  - id: my-api
+    name: my-api
+    path: ../my-api
+    type: serverless-js
+    environment: my-product             # Links to docs/environments/my-product/product-vision.md
+    description: Serverless REST API
+    scan_dirs:
+      - src
+      - resources
+    skip_patterns:
+      - node_modules
+      - .serverless
+      - .webpack
+    verify:
+      - command: npx
+        args: [webpack, --mode, production]
+      - command: npm
+        args: [test]
+    package_manager: npm
+    merge:
+      target_branch: main               # Branch PRs merge into (default: main)
+      strategy: squash                   # squash | merge | rebase (default: squash)
+      max_attempts: 3                    # Merge retry limit (default: 3)
+      ci_timeout_ms: 300000              # CI check timeout in ms (default: 300000)
+
+  - id: my-frontend
+    name: my-frontend
+    path: ../my-frontend
+    type: react-vite
+    environment: my-product             # Same environment as the API
+    description: React frontend
+    scan_dirs:
+      - src
+    skip_patterns:
+      - node_modules
+      - dist
+      - src/components/ui               # Exclude generated/boilerplate directories
+    verify:
+      - command: npm
+        args: [run, build]
+    package_manager: npm
+    sensitive_files:                     # Files the AI should never modify (optional)
+      - src/config/api-config.ts
+      - vite.config.ts
+    reference_context:                   # Cross-project files for LLM context (optional)
+      - project: my-api
+        label: "Backend API"
+        files:
+          - src/handlers/users.js
+          - src/handlers/posts.js
+
+# --- Supported project types ---
+#
+# typescript-node   — Node.js with TypeScript
+# serverless-js     — Serverless Framework (JavaScript/CommonJS)
+# serverless-ts     — Serverless Framework (TypeScript)
+# react-vite        — React + Vite (TypeScript)
+# react-next        — Next.js (TypeScript)
+# express           — Express.js API
+# (or any descriptive string — the type helps the LLM understand the project)
+#
+# --- Optional advanced fields ---
+#
+# import_rules:                         # Library version constraints injected into LLM prompts
+#   - package: "@tanstack/react-query"
+#     version: 5
+#     rules:
+#       - "useQuery requires object form: useQuery({ queryKey, queryFn })"
+#
+# sensitive_files:                      # Files the AI avoids modifying
+#   - src/lib/auth.js
+#   - serverless.yml
+#
+# reference_context:                    # Read-only files from other projects given to the LLM
+#   - project: my-api
+#     label: "Backend API"
+#     files: [src/handlers/users.js]

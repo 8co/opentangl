@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# User data (created during setup, never committed)
+projects.yaml
+tasks/
+docs/environments/*/
+docs/product-vision.md
+docs/usage.md
+docs/aws-deployment-plan.md
+workflows/
+
+# Project-specific validation scripts
+scripts/validate/*/
+scripts/validate/run-all.mjs
+scripts/validate/lib/
+
+# Runtime state
+.state/
+output/
+scheduled-runs.json
+daily-spending.json
+rollback-history.log
+
+# Temporary files
+.tmp-workflow-*
+*.tgz
+
+# Process lock
+.orchestrator.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+.cursor/*
+!.cursor/rules/
+*.swp
+
+# AWS / SST
+.sst/
+.serverless/
+.aws-sam/
+.open-next/
