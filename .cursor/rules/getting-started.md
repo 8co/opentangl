@@ -31,9 +31,15 @@ Ask the user:
    - Next.js: `npx create-next-app@latest {name} --typescript`
    - Serverless: `npx serverless create --template aws-nodejs --path {name}`
    - Express: create `package.json` + `src/index.ts` manually
-4. Initialize git if not already: `git init && git add . && git commit -m "Initial scaffold"`
-5. Create a GitHub repo: `gh repo create {name} --public --source . --push`
-6. Proceed to **Step 2** with the path(s) to the new project(s).
+4. **Install base dependencies the project will need.** OpenTangl cannot run `npm install` during execution — it can write code that imports packages, but if those packages aren't already installed, verification (`tsc`, `build`) will fail. Based on the project description, install obvious dependencies upfront:
+   - Serverless + DynamoDB: `npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb`
+   - Serverless + S3: `npm install @aws-sdk/client-s3`
+   - Express: `npm install express && npm install -D @types/express`
+   - Any project with TypeScript types: install `@types/*` packages as needed
+   - Ask the user: **"What services or libraries will this project use?"** and install them now.
+5. Initialize git if not already: `git init && git add . && git commit -m "Initial scaffold"`
+6. Create a GitHub repo: `gh repo create {name} --public --source . --push`
+7. Proceed to **Step 2** with the path(s) to the new project(s).
 
 For **full-stack**: scaffold both projects (API + UI) as sibling directories, then register each separately in Step 2.
 
@@ -170,5 +176,6 @@ nohup caffeinate -dims npx --yes tsx src/cli.ts autopilot --projects {ids} --cyc
 
 - **"No pending tasks"**: The queue is empty. Run autopilot to have the LLM propose tasks, or the vision doc may need more specific priorities.
 - **Build failures**: OpenTangl retries up to 3 times with error feedback. If all attempts fail, the task is marked failed and skipped.
+- **"Cannot find module" / missing package errors**: OpenTangl cannot install npm packages during execution. If a task fails because an import can't be resolved, install the missing package manually (`npm install {package}`) and re-run. To prevent this, install likely dependencies during initial setup (see Step 1, Path A, step 4).
 - **Escalated PRs**: The LLM reviewer flagged critical concerns. Check the GitHub issue it created for details.
 - **"OPENAI_API_KEY is required"**: Copy `.env.example` to `.env` and add your key.
