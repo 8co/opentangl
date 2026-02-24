@@ -131,11 +131,52 @@ DEFAULT_AGENT=anthropic
 
 They can configure both providers and switch between them later.
 
-## Step 5 — First Run
+## Step 5 — How Tasks Get Created
+
+Before running anything, explain that OpenTangl uses a **task queue** (`tasks/queue.yaml`) to decide what work to do. There are two ways tasks get into the queue:
+
+1. **The LLM proposes them.** OpenTangl reads the vision doc, scans the codebase, and the LLM decides what to build next. This happens automatically in `autopilot` mode, or on demand with the `propose` command.
+
+2. **You write them yourself.** You can add tasks directly to `tasks/queue.yaml`. Each task describes a specific piece of work — OpenTangl picks them up and executes them the same way it would execute LLM-proposed tasks.
+
+Ask the user: **"Do you want to add any specific tasks to the queue, or let the LLM propose work based on your vision doc?"**
+
+If they want to add their own tasks, help them write entries in `tasks/queue.yaml` using this format:
+
+```yaml
+tasks:
+  - id: my-task-id                    # Unique kebab-case identifier
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: {project-id}             # Must match an id from projects.yaml
+    task_type: feature                # feature | architecture | maintenance
+    variables:
+      feature_name: "short name"
+      feature_description: >
+        Detailed description of what to build. Be specific — this is
+        what the LLM will implement. Include expected behavior, files
+        to create or modify, and any constraints.
+    context_files:                    # Optional — files the LLM should read first
+      - src/app/page.tsx
+    depends_on:                       # Optional — task IDs that must complete first
+      - other-task-id
+```
+
+If they want both — their own tasks plus LLM-proposed ones — that works. The LLM will see existing pending tasks and propose additional ones that complement them.
+
+## Step 6 — First Run
 
 1. Install dependencies: `npm install`
-2. Initialize an empty task queue: create `tasks/queue.yaml` with content `tasks: []`
+2. Initialize the task queue: create `tasks/queue.yaml` with content `tasks: []` (or with the user's tasks from Step 5)
 3. Run the first cycle:
+
+If the user added their own tasks and wants to execute just those:
+```bash
+npx tsx src/cli.ts schedule loop --projects {project-id}
+```
+
+If the user wants the LLM to propose tasks and execute them:
 ```bash
 npx tsx src/cli.ts autopilot --projects {project-id} --cycles 1 --feature-ratio 0.8
 ```
@@ -147,7 +188,7 @@ npx tsx src/cli.ts autopilot --projects {api-id},{ui-id} --cycles 1 --feature-ra
 
 Explain what will happen:
 - OpenTangl reads the vision doc and scans the codebase
-- It proposes tasks aligned with the vision
+- In `autopilot` mode, it proposes tasks aligned with the vision
 - It executes each task autonomously (writes code, runs verification)
 - It creates PRs, reviews them with the LLM, and merges if clean
 - At the end, it updates the vision doc with progress
@@ -156,18 +197,59 @@ Explain what will happen:
 
 ## Ongoing Usage
 
-After setup, the user runs autopilot whenever they want development cycles:
+OpenTangl has several commands for running tasks. The user can mix and match depending on how much control they want.
+
+### Running tasks
 
 ```bash
+# Full autopilot — LLM proposes and executes in a loop
 npx tsx src/cli.ts autopilot --projects {ids} --cycles {n} --feature-ratio 0.8
+
+# Execute all pending tasks in the queue (no new proposals)
+npx tsx src/cli.ts schedule loop --projects {ids}
+
+# Execute just the next pending task
+npx tsx src/cli.ts next --project {id}
+
+# Poll for new tasks every 5 minutes and execute them continuously
+npx tsx src/cli.ts schedule watch --projects {ids}
 ```
 
-Key flags:
-- `--cycles N`: how many propose-execute loops to run
+### Proposing tasks without executing
+
+```bash
+# Preview what the LLM would propose (nothing is added to the queue)
+npx tsx src/cli.ts propose preview --projects {ids}
+
+# Have the LLM propose tasks and add them to the queue (but don't execute yet)
+npx tsx src/cli.ts propose queue --projects {ids}
+```
+
+### Other commands
+
+```bash
+# Check the current queue
+npx tsx src/cli.ts queue
+
+# Merge completed branches via PR pipeline
+npx tsx src/cli.ts merge
+
+# Remove completed/failed/skipped tasks from the queue
+npx tsx src/cli.ts prune
+
+# Run a cross-project wiring audit
+npx tsx src/cli.ts wire --projects {ids}
+```
+
+### Key flags
+
+- `--cycles N`: how many propose-execute loops to run (autopilot only)
 - `--feature-ratio 0.8`: 80% features, 20% maintenance/testing (adjustable)
 - `--agent openai|anthropic`: override the default LLM provider
 
-For background execution (keeps running after terminal closes):
+### Background execution
+
+For long-running sessions (keeps running after terminal closes):
 ```bash
 nohup caffeinate -dims npx --yes tsx src/cli.ts autopilot --projects {ids} --cycles 3 --feature-ratio 0.8 > /tmp/opentangl.log 2>&1 &
 ```
