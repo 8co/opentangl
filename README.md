@@ -99,30 +99,30 @@ npx tsx src/cli.ts autopilot --projects my-project --cycles 1 --feature-ratio 0.
 
 ```mermaid
 flowchart TD
-    A[Product Vision\nyou write this] --> B[Task Proposer\nLLM scans + proposes]
-    B --> C[Task Queue\ntasks/queue.yaml]
-    U[Your Own Tasks\nadd directly to queue] --> C
+    A["Product Vision<br/>(you write this)"] --> B["Task Proposer<br/>(LLM scans + proposes)"]
+    B --> C["Task Queue<br/>(tasks/queue.yaml)"]
+    U["Your Own Tasks<br/>(add directly to queue)"] --> C
 
-    C --> D[Autonomous Runner]
+    C --> D["Autonomous Runner"]
 
-    D --> D1[Call LLM]
-    D1 --> D2[Write files]
-    D2 --> D3[Build + test]
-    D3 --> D4{Passed?}
-    D4 -- Yes --> D5[Git commit]
-    D4 -- No --> D6[Retry with\nerror feedback]
+    D --> D1["Call LLM"]
+    D1 --> D2["Write files"]
+    D2 --> D3["Build + test"]
+    D3 --> D4{"Passed?"}
+    D4 -->|Yes| D5["Git commit"]
+    D4 -->|No| D6["Retry with<br/>error feedback"]
     D6 --> D1
 
-    D5 --> E[Merge Pipeline]
+    D5 --> E["Merge Pipeline"]
 
-    E --> E1[Push branch]
-    E1 --> E2[Create PR]
-    E2 --> E3[LLM review]
-    E3 --> E4{Approved?}
-    E4 -- Yes --> E5[Merge]
-    E4 -- No --> E6[Escalate to\nGitHub Issue]
+    E --> E1["Push branch"]
+    E1 --> E2["Create PR"]
+    E2 --> E3["LLM review"]
+    E3 --> E4{"Approved?"}
+    E4 -->|Yes| E5["Merge"]
+    E4 -->|No| E6["Escalate to<br/>GitHub Issue"]
 
-    E5 --> F[Vision updated\nwith progress]
+    E5 --> F["Vision updated<br/>with progress"]
 ```
 
 ### Multi-project awareness
@@ -138,13 +138,13 @@ When working across repos (e.g., API + frontend), OpenTangl:
 flowchart LR
     subgraph Cycle
         direction TB
-        W[Wiring Audit] --> P[Propose Tasks]
-        P --> T1[API task]
-        P --> T2[UI task]
+        W["Wiring Audit"] --> P["Propose Tasks"]
+        P --> T1["API task"]
+        P --> T2["UI task"]
         T1 -->|depends_on| T2
-        T1 --> M1[Merge inline]
+        T1 --> M1["Merge inline"]
         M1 --> T2
-        T2 --> M2[Merge]
+        T2 --> M2["Merge"]
     end
 ```
 
