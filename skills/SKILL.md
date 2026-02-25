@@ -1,29 +1,39 @@
 ---
 name: opentangl
-description: Set up and run OpenTangl — an autonomous AI development engine that scans your codebase, proposes tasks aligned with a product vision, writes code, runs verification, creates PRs, and merges — all in a closed loop. Works with any JS/TS project.
-metadata: {"clawdbot":{"emoji":"🤖","requires":{"anyBins":["node","git","gh"],"anyEnv":["OPENAI_API_KEY","ANTHROPIC_API_KEY"]}}}
+description: Not a code generator — an entire dev team. Point it at any JS/TS project and a product vision. It plans features, writes code, verifies builds, creates PRs, reviews diffs, and merges — autonomously. Manages multiple repos as one product. Use when you want to ship code without writing it.
+homepage: https://github.com/8co/opentangl
+metadata: {"clawdbot":{"emoji":"🤖","requires":{"bins":["node","git","gh"],"env":["OPENAI_API_KEY","ANTHROPIC_API_KEY"]},"primaryEnv":"OPENAI_API_KEY"}}
 ---
 
 # OpenTangl
 
 Set up a self-driving development loop for any JavaScript/TypeScript project. OpenTangl reads a product vision, proposes tasks, writes code, verifies it builds, creates PRs, reviews them with an LLM, and merges — autonomously.
 
+## Safety
+
+This skill performs high-impact operations: cloning a repo, running `npm install`, creating git branches, pushing to GitHub, creating PRs, and merging. Every destructive action below includes an explicit user confirmation step. **Do not skip confirmations.** If running in a fully autonomous context without user interaction, ensure you have separate policy controls gating pushes and merges. For maximum safety, run OpenTangl in an isolated environment (container or VM) and use a GitHub machine account with narrow repo-scoped permissions.
+
 ## Prerequisites
 
-Before starting, verify these are installed. Check silently — only mention what's missing.
+Tell the user you'll check for required tools, then run each check and report the results:
 
-- **Node.js** ≥ 18 (`node --version`)
-- **git** configured with a remote (`git --version`)
-- **GitHub CLI** authenticated (`gh auth status`) — needed for PR creation and merging
-- An **LLM API key** — OpenAI (`OPENAI_API_KEY`) or Anthropic (`ANTHROPIC_API_KEY`)
+- **Node.js** ≥ 18 — run `node --version` and show the output
+- **git** — run `git --version` and show the output
+- **GitHub CLI** — run `gh auth status` and show the output (needed for PR creation and merging)
+- An **LLM API key** — ask the user if they have an OpenAI or Anthropic API key ready
 
-If anything is missing, tell the user exactly how to install it and stop until resolved.
+Report all results to the user. If anything is missing, tell them exactly how to install it and stop until resolved.
 
 ## Step 1 — Clone OpenTangl
 
 ```bash
-git clone https://github.com/opentangl/opentangl.git
+git clone https://github.com/8co/opentangl.git
 cd opentangl
+```
+
+**Before installing dependencies, confirm with the user:** "This will run `npm install` to download OpenTangl's dependencies (openai, anthropic SDK, yaml, dotenv, uuid). These are fetched from npm and may include lifecycle scripts. You can review `package.json` first. Proceed?"
+
+```bash
 npm install
 ```
 
@@ -39,30 +49,30 @@ Ask the user:
 
 1. Ask: **"What do you want to build?"** Get a 2-3 sentence description.
 2. Ask: **"What type of app?"** — Frontend (React/Vite, Next.js), API/Backend (Serverless, Express), or Full-stack (both).
-3. Scaffold the project using the appropriate tool:
+3. **Show the scaffold command and confirm before running:**
    - React + Vite: `npm create vite@latest {name} -- --template react-ts`
    - Next.js: `npx create-next-app@latest {name} --typescript`
    - Serverless: `npx serverless create --template aws-nodejs --path {name}`
    - Express: create `package.json` + `src/index.ts` manually
-4. Initialize git: `git init && git add . && git commit -m "Initial scaffold"`
-5. Create a GitHub repo: `gh repo create {name} --public --source . --push`
+4. **Confirm with user**, then initialize git: `git init && git add . && git commit -m "Initial scaffold"`
+5. **Ask the user to confirm** before creating a GitHub repo: `gh repo create {name} --public --source . --push`
 6. Note the path to the new project relative to the OpenTangl root.
 
 ### Path B: Existing Project
 
 1. Ask: **"Where is your project?"** Accept a path. If they say "this directory," use cwd.
-2. Auto-detect the project by scanning its root:
+2. Tell the user you'll read config files in their project directory to detect the setup. Only inspect files in the directory the user provided — do not scan outside it. Check:
    - **Type**: `tsconfig.json` → TypeScript, `vite.config.ts` → Vite, `next.config.*` → Next.js, `serverless.yml` → Serverless
    - **Package manager**: `package-lock.json` → npm, `yarn.lock` → yarn, `pnpm-lock.yaml` → pnpm
    - **Build/test commands**: Read `package.json` scripts for `build`, `test`, `lint`, `typecheck`
    - **Source dirs**: Default to `src/` if it exists
    - **Target branch**: Check `git symbolic-ref refs/remotes/origin/HEAD` or look for `main` vs `master`
-3. Present what you detected and confirm with the user.
+3. Show everything you detected and confirm with the user before proceeding.
 4. Ask: "Are there other repos that are part of this same product?" If yes, repeat detection for each.
 
 ### Path C: Not Sure
 
-Explore the filesystem, check git status, read config files, then route to Path A or B.
+Ask the user to provide the path to their project directory. Once provided, check git status and read config files in that directory, then route to Path A or B.
 
 ## Step 3 — Generate projects.yaml
 
@@ -132,7 +142,11 @@ If the user isn't sure, offer to scan the codebase and suggest priorities.
 
 ## Step 5 — Configure the LLM
 
-Create `.env` in the OpenTangl root:
+Before creating the `.env` file, **verify that `.env` appears in the project's `.gitignore`** by reading the file. Confirm to the user that it is gitignored so keys will never be committed or pushed.
+
+If `.env` is NOT in `.gitignore`, add it before proceeding and tell the user you've done so.
+
+**Ask the user which provider they want to use**, then have them paste their key. Do not store or log the key anywhere other than the `.env` file.
 
 **For OpenAI:**
 ```
@@ -159,7 +173,7 @@ mkdir -p tasks
 echo "tasks: []" > tasks/queue.yaml
 ```
 
-Run the first autopilot cycle:
+**Show the user the command and confirm before running.** The autopilot will create branches, commits, and PRs on their behalf:
 
 ```bash
 npx tsx src/cli.ts autopilot --projects {project-id} --cycles 1 --feature-ratio 0.8

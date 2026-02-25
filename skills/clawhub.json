@@ -1,0 +1,42 @@
+{
+  "name": "opentangl",
+  "version": "0.1.0",
+  "tagline": "Not a code generator — an entire dev team",
+  "description": "Point it at any JS/TS project and a product vision. It plans features, writes code, verifies builds, creates PRs, reviews diffs, and merges — autonomously. Manages multiple repos as one product. Use when you want to ship code without writing it.",
+  "category": "Development Tools",
+  "tags": [
+    "ai-agents",
+    "code-generation",
+    "autonomous-development",
+    "multi-repo",
+    "typescript",
+    "workflow-automation",
+    "llm",
+    "openai",
+    "anthropic",
+    "devtools"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "opentangl",
+    "github": "https://github.com/8co/opentangl"
+  },
+  "repository": "https://github.com/8co/opentangl",
+  "homepage": "https://opentangl.com",
+  "support": {
+    "issues": "https://github.com/8co/opentangl/issues",
+    "discussions": "https://github.com/8co/opentangl/discussions"
+  },
+  "requires": {
+    "bins": ["node", "git", "gh"],
+    "env": {
+      "anyOf": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    }
+  },
+  "entry": "SKILL.md",
+  "screenshots": [
+    "assets/screenshot-setup.png",
+    "assets/screenshot-autopilot.png",
+    "assets/screenshot-pr-merge.png"
+  ]
+}
