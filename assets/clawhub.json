@@ -2,7 +2,7 @@
   "name": "opentangl",
   "version": "0.1.0",
   "tagline": "Not a code generator — an entire dev team",
-  "description": "Point it at any JS/TS project and a product vision. It plans features, writes code, verifies builds, creates PRs, reviews diffs, and merges — autonomously. Manages multiple repos as one product. Use when you want to ship code without writing it.",
+  "description": "Point it at any JS/TS project and a product vision. It plans features, writes code, verifies builds, creates PRs, reviews diffs, and merges — autonomously. Manages multiple repos as one product. Use when you want to ship code without writing it. Part of the Undertow skill collection.",
   "category": "Development Tools",
   "tags": [
     "ai-agents",
@@ -10,11 +10,16 @@
     "autonomous-development",
     "multi-repo",
     "typescript",
+    "javascript",
     "workflow-automation",
+    "github",
+    "pull-requests",
+    "code-review",
+    "ci-cd",
     "llm",
     "openai",
     "anthropic",
-    "devtools"
+    "ai-coding-assistant"
   ],
   "license": "MIT",
   "author": {

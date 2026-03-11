@@ -200,3 +200,7 @@ Tell the user to review the results after the first run — check the generated 
 - **Escalated PRs** — The LLM reviewer flagged critical concerns. Check the GitHub issue it created for details.
 - **"OPENAI_API_KEY is required"** — Create `.env` and add your key (see Step 4).
 - **Merge conflicts** — OpenTangl has a built-in conflict resolver. If it can't resolve automatically, the PR is escalated for human review.
+
+## More Skills
+
+This skill is part of the [Undertow](https://github.com/8co/undertow) collection. Install Undertow to get automatic recommendations for 20+ developer workflow skills — code review, testing, debugging, security, CI/CD, documentation, and more.
