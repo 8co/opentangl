@@ -107,6 +107,7 @@ export interface SchedulerConfig {
   basePath: string;
   adapters: Record<string, AgentAdapter>;
   defaultAgent: AgentType;
+  liteAgent?: AgentType; // Cheaper model for maintenance task execution
   queuePath?: string;
   pollIntervalMs?: number; // For watch mode (default: 5 minutes)
   projectConfig?: ProjectConfig; // Single project (backward compat)
@@ -162,13 +163,14 @@ export function createScheduler(config: SchedulerConfig) {
     basePath,
     adapters,
     defaultAgent,
+    liteAgent,
     queuePath,
     pollIntervalMs = 5 * 60 * 1000,
     registry,
   } = config;
 
   const queue = createQueueManager(basePath, queuePath);
-  const runner = createAutonomousRunner({ adapters, defaultAgent });
+  const runner = createAutonomousRunner({ adapters, defaultAgent, liteAgent });
 
   /**
    * Resolve the project config for a task.
@@ -247,6 +249,8 @@ export function createScheduler(config: SchedulerConfig) {
       verify: projectConfig?.verify
         ? verifyCommandsForProject(projectConfig.verify)
         : undefined,
+      // Maintenance tasks are low-stakes edits — use the cheaper model
+      useLite: task.task_type === 'maintenance',
     };
 
     // For external projects, use their absolute path as target_dir
@@ -681,6 +685,7 @@ export function createScheduler(config: SchedulerConfig) {
       const mergePipeline = registry ? createMergePipeline({
         adapters,
         defaultAgent,
+        liteAgent,
         registry,
         basePath,
       }) : null;
@@ -759,6 +764,7 @@ export function createScheduler(config: SchedulerConfig) {
       const mergePipeline = registry ? createMergePipeline({
         adapters,
         defaultAgent,
+        liteAgent,
         registry,
         basePath,
       }) : null;

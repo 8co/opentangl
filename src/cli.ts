@@ -162,6 +162,11 @@ function buildAdapters(config: ReturnType<typeof loadConfig>): Record<string, Ag
       apiKey: config.openai.apiKey,
       model: config.openai.model,
     });
+    // Lite adapter for low-stakes stages (propose, review, vision, wiring audit)
+    adapters['openai-lite'] = createOpenAIAdapter({
+      apiKey: config.openai.apiKey,
+      model: config.openai.liteModel,
+    });
     // Codex uses the same OpenAI API
     adapters.codex = createOpenAIAdapter(
       { apiKey: config.openai.apiKey, model: config.openai.model },
@@ -170,6 +175,16 @@ function buildAdapters(config: ReturnType<typeof loadConfig>): Record<string, Ag
   }
 
   return adapters;
+}
+
+/**
+ * Return the lite adapter for a given agent if one exists, otherwise fall
+ * back to the full adapter. Used for stages that don't require codegen
+ * (propose, diff review, vision update, wiring audit).
+ */
+function liteAdapterFor(agentName: AgentType, adapters: Record<string, AgentAdapter>): AgentAdapter {
+  const liteKey = `${agentName}-lite`;
+  return adapters[liteKey] ?? adapters[agentName];
 }
 
 async function main() {
@@ -332,6 +347,7 @@ async function main() {
         basePath,
         adapters,
         defaultAgent: agentToUse,
+        liteAgent: `${agentToUse}-lite` in adapters ? `${agentToUse}-lite` as AgentType : agentToUse,
         registry,
         onTaskStart: setCurrentTask,
         onTaskEnd: () => setCurrentTask(null),
@@ -361,6 +377,7 @@ async function main() {
         basePath,
         adapters,
         defaultAgent: agentToUse,
+        liteAgent: `${agentToUse}-lite` in adapters ? `${agentToUse}-lite` as AgentType : agentToUse,
         registry,
         onTaskStart: setCurrentTask,
         onTaskEnd: () => setCurrentTask(null),
@@ -388,7 +405,7 @@ async function main() {
       }
       validateConfig(config, agentToUse);
 
-      const proposerAdapter = adapters[agentToUse];
+      const proposerAdapter = liteAdapterFor(agentToUse, adapters);
       if (!proposerAdapter) {
         console.error(`❌ No adapter for agent: ${agentToUse}`);
         process.exit(1);
@@ -450,7 +467,7 @@ async function main() {
       }
       validateConfig(config, agentToUse);
 
-      const proposerAdapter = adapters[agentToUse];
+      const proposerAdapter = liteAdapterFor(agentToUse, adapters);
       if (!proposerAdapter) {
         console.error(`❌ No adapter for agent: ${agentToUse}`);
         process.exit(1);
@@ -627,10 +644,12 @@ async function main() {
         await commitQueueState(basePath, `Queue: add ${newTasks.length} proposed tasks`);
 
         // Step 2: Run all pending tasks
+        const liteAgentKey = `${agentToUse}-lite` in adapters ? `${agentToUse}-lite` as AgentType : agentToUse;
         const scheduler = createScheduler({
           basePath,
           adapters,
           defaultAgent: agentToUse,
+          liteAgent: liteAgentKey,
           registry,
           onTaskStart: setCurrentTask,
           onTaskEnd: () => setCurrentTask(null),
@@ -798,7 +817,7 @@ async function main() {
       }
       validateConfig(config, agentToUse);
 
-      const wireAdapter = adapters[agentToUse];
+      const wireAdapter = liteAdapterFor(agentToUse, adapters);
       if (!wireAdapter) {
         console.error(`❌ No adapter for agent: ${agentToUse}`);
         process.exit(1);
@@ -858,6 +877,7 @@ async function main() {
       const mergePipeline = createMergePipeline({
         adapters,
         defaultAgent: agentToUse,
+        liteAgent: `${agentToUse}-lite` in adapters ? `${agentToUse}-lite` as AgentType : agentToUse,
         registry,
         basePath,
       });

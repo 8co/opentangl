@@ -16,6 +16,7 @@ export interface Config {
   openai: {
     apiKey: string;
     model: string;
+    liteModel: string;
   };
   defaultAgent: AgentType;
 }
@@ -29,6 +30,7 @@ export function loadConfig(): Config {
     openai: {
       apiKey: process.env.OPENAI_API_KEY ?? '',
       model: process.env.OPENAI_MODEL ?? 'gpt-4o',
+      liteModel: process.env.OPENAI_LITE_MODEL ?? 'gpt-4o-mini',
     },
     defaultAgent: (process.env.DEFAULT_AGENT as AgentType) ?? 'anthropic',
   };

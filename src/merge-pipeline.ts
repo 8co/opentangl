@@ -40,6 +40,7 @@ import type { AgentAdapter, AgentRequest, AgentType } from './types.js';
 export interface MergePipelineConfig {
   adapters: Record<string, AgentAdapter>;
   defaultAgent: AgentType;
+  liteAgent?: AgentType; // Cheaper model for review/PR description (no codegen)
   registry: ProjectRegistry;
   basePath: string; // Orchestrator root (for prompt templates)
   queuePath?: string;
@@ -79,6 +80,7 @@ export function createMergePipeline(config: MergePipelineConfig) {
   const {
     adapters,
     defaultAgent,
+    liteAgent,
     registry,
     basePath,
     queuePath,
@@ -87,9 +89,20 @@ export function createMergePipeline(config: MergePipelineConfig) {
   const queue = createQueueManager(basePath, queuePath);
 
   /**
-   * Get the LLM adapter for merge operations.
+   * Full adapter for code-writing operations (CI fix, conflict resolution).
    */
   function getAdapter(): AgentAdapter | null {
+    return adapters[defaultAgent] ?? null;
+  }
+
+  /**
+   * Lite adapter for read/summarise operations (PR description, diff review).
+   * Falls back to the full adapter if no lite adapter is configured.
+   */
+  function getLiteAdapter(): AgentAdapter | null {
+    if (liteAgent && adapters[liteAgent]) {
+      return adapters[liteAgent];
+    }
     return adapters[defaultAgent] ?? null;
   }
 
@@ -101,7 +114,7 @@ export function createMergePipeline(config: MergePipelineConfig) {
     taskId: string,
     taskDescription?: string
   ): Promise<{ title: string; body: string }> {
-    const adapter = getAdapter();
+    const adapter = getLiteAdapter();
     if (!adapter) {
       return {
         title: `Auto: ${taskId}`,
@@ -379,9 +392,12 @@ Body: <1-3 sentence description of what changed and why>`;
       // Queue update is non-critical
     }
 
-    // Step 3: LLM reviews the diff
+    // Full adapter for code-writing operations (CI fix, conflict resolution)
     const adapter = getAdapter();
-    if (adapter) {
+
+    // Step 3: LLM reviews the diff (uses lite model — read/summarise only)
+    const liteAdapter = getLiteAdapter();
+    if (liteAdapter) {
       console.log(`  🔍 LLM reviewing diff...`);
       const diffResult = await getPRDiff(cwd, prNumber);
 
@@ -393,7 +409,7 @@ Body: <1-3 sentence description of what changed and why>`;
             projectName,
             branchName: input.branch,
           },
-          adapter,
+          liteAdapter,
           basePath
         );
 

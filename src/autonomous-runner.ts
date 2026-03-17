@@ -38,6 +38,7 @@ export interface AutoStep {
   id: string;
   prompt: string;           // Path to prompt template
   agent?: AgentType;        // Override agent for this step
+  useLite?: boolean;        // Use the lite (cheaper) model — for maintenance tasks
   context_files?: string[]; // Project files to include as context
   verify?: VerifyCommand[]; // Custom verification commands (defaults to tsc)
   max_attempts?: number;    // Max LLM attempts including error feedback (default 3)
@@ -83,10 +84,11 @@ export interface AutoExecutionResult {
 interface AutoRunnerDeps {
   adapters: Record<string, AgentAdapter>;
   defaultAgent: AgentType;
+  liteAgent?: AgentType; // Cheaper model for maintenance tasks
 }
 
 export function createAutonomousRunner(deps: AutoRunnerDeps) {
-  const { adapters, defaultAgent } = deps;
+  const { adapters, defaultAgent, liteAgent } = deps;
 
   /**
    * Load and parse an autonomous workflow YAML.
@@ -131,7 +133,7 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
   ): Promise<AutoStepResult> {
     const start = Date.now();
     const maxAttempts = step.max_attempts ?? 3;
-    const agentName = step.agent ?? defaultAgent;
+    const agentName = step.agent ?? (step.useLite && liteAgent ? liteAgent : defaultAgent);
     const adapter = adapters[agentName];
     const targetDir = resolve(basePath, workflow.target_dir);
     const verifyCommands = step.verify ?? workflow.verify ?? defaultVerifyCommands();
