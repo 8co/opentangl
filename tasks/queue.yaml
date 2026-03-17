@@ -1,0 +1,439 @@
+tasks:
+  - id: fix-leaderboard-filters-and-stats
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-api
+    task_type: maintenance
+    context_files:
+      - src/handlers/revisions/top.js
+      - src/models/revisions.js
+    variables:
+      feature_name: leaderboard advanced filters and summary stats
+      feature_description: >
+        Update src/handlers/revisions/top.js to fix two silent gaps that make the leaderboard UI non-functional for
+        advanced use.
+
+        1. FILTERS: The handler ignores minScore, authorId, and promptId query params even though the UI sends them. Add
+        support for all three, applied in-memory after the DynamoDB query: - minScore (number): exclude revisions with
+        score < minScore - authorId (string): only include revisions where revision.authorId === authorId - promptId
+        (string): only include revisions where revision.promptId === promptId Apply these in the same filtering pass as
+        the existing status filter. Cursor pagination must still work correctly after filtering.
+
+        2. SUMMARY STATS: The UI expects a summaryStats object but the handler never returns it. After filtering the
+        full result set (before cursor pagination), calculate and return:
+          summaryStats: {
+            totalRevisions: count of all revisions matching filters,
+            averageScore: mean of scores across all matching revisions (1 decimal, e.g. 74.3),
+            uniquePromptsCount: count of distinct promptIds in the full filtered set
+          }
+        summaryStats must reflect the full filtered set, not just the current cursor page. Final response shape: {
+        items: [...paginated...], cursor: ..., summaryStats: { ... } }
+    started_at: 2026-03-17T00:13:34.009Z
+    completed_at: 2026-03-17T00:14:58.835Z
+    branch: auto/fix-leaderboard-filters-and-stats
+    merge_status: merged
+    pr_number: 274
+    pr_url: https://github.com/PromptScorer/prompt-scorer-sls-api/pull/274
+    merge_attempts: 1
+  - id: api-key-read-auth-public-prompts
+    status: skipped
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-api
+    task_type: feature
+    context_files: &a1
+      - src/handlers/prompts/getPublic.js
+      - src/handlers/apiKeys/manage.js
+    variables:
+      feature_name: optional API key authentication on GET /prompts/public
+      feature_description: >
+        Update src/handlers/prompts/getPublic.js to support optional API key auth so external developers can query the
+        public prompt library programmatically.
+
+        When an Authorization: Bearer ps_sk_* header is present: 1. STRICT FORMAT VALIDATION FIRST: Before any DynamoDB
+        lookup, validate the token format strictly.
+           The key must match the exact regex /^ps_sk_[A-Za-z0-9]{32,64}$/ — reject anything that does not
+           match with 401: { error: 'Invalid or revoked API key' }. This prevents arbitrary strings from
+           reaching the database lookup.
+        2. Look up the validated key in DynamoDB using the same pattern already used in
+           src/handlers/apiKeys/manage.js (query the api-keys table by keyHash or agentId).
+        3. If the key is found and not revoked, the request proceeds normally with agent context attached.
+           Include callerType: 'agent' and agentId in the top-level response JSON.
+           Also add a response header: x-authenticated-as: agent.
+        4. If the key is invalid, not found, or revoked, return 401: { error: 'Invalid or revoked API key' }.
+           Always return the same generic message regardless of reason — do not distinguish between
+           "not found" and "revoked" to avoid key enumeration.
+
+        SECURITY REQUIREMENTS (previous attempt was rejected for violating these — do not skip them): -
+        touchApiKeyLastUsed MUST be wrapped in its own try/catch so a failure updating lastUsedAt never
+          causes the request to fail or leak an error. Log the error silently and let the request succeed.
+        - touchApiKeyLastUsed MUST only be called AFTER the key has been confirmed valid and not revoked.
+          Never update lastUsedAt on an invalid key.
+        - The lastUsedAt update is fire-and-forget (do not await it in the main request path). This avoids
+          any latency hit and makes the race condition on concurrent requests irrelevant.
+
+        When no Authorization header is present, existing behavior is completely unchanged — unauthenticated public
+        access still works as before.
+
+        Use AWS SDK v3 DynamoDB DocumentClient (require('@aws-sdk/lib-dynamodb')) to match the existing codebase
+        pattern. Do NOT add or modify any route definitions in resources/functions.yml — the endpoint already exists
+        without an authorizer.
+    started_at: 2026-03-17T00:51:58.166Z
+    completed_at: 2026-03-17T00:54:01.995Z
+    branch: auto/api-key-read-auth-public-prompts
+    merge_status: escalated
+    pr_number: 280
+    pr_url: https://github.com/PromptScorer/prompt-scorer-sls-api/pull/280
+    merge_attempts: 0
+    issue_url: https://github.com/PromptScorer/prompt-scorer-sls-api/issues/281
+    error: Re-queued as retry-api-key-read-auth-public-prompts
+  - id: ui-leaderboard-stats
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: maintenance
+    context_files:
+      - src/pages/RevisionsLeaderboard.tsx
+      - src/utils/revisions-normalize.ts
+      - src/components/leaderboard/LeaderboardSummaryCards.tsx
+    variables:
+      feature_name: wire leaderboard summary stats cards to API response
+      feature_description: >
+        RevisionsLeaderboard has been refactored. Context files reflect the current structure.
+        The page renders a <LeaderboardSummaryCards> component. The API returns:
+          { items: [...], cursor: string, summaryStats: { totalRevisions, averageScore, uniquePromptsCount } }
+
+        IMPORTANT: the field name is `uniquePromptsCount` (NOT `uniquePrompts` or `promptCount`).
+
+        In RevisionsLeaderboard.tsx, read `summaryStats` from the top-level query response alongside `items`
+        and pass it as a prop to <LeaderboardSummaryCards>. In LeaderboardSummaryCards.tsx, read
+        `totalRevisions`, `averageScore` (formatted to 1 decimal), and `uniquePromptsCount` from
+        the `summaryStats` prop. Show skeletons while loading, "—" only when summaryStats is absent.
+        Do NOT change layout, styling, or any other feature.
+  - id: ui-developer-api-read-access
+    status: skipped
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: feature
+    depends_on:
+      - api-key-read-auth-public-prompts
+    context_files:
+      - src/pages/Developers.tsx
+      - src/services/api-keys-service.ts
+      - src/config/api-config.ts
+    variables:
+      feature_name: developer API read access panel and code examples
+      feature_description: >
+        Update the Developers page to surface the new read access capability for API keys.
+
+        1. READ SCOPE IN KEY CREATION: When creating an API key, add 'read' as a selectable permission scope alongside
+        existing options. Label: "Read" with description: "Query the public prompt library programmatically."
+
+        2. CODE SNIPPET PANEL: Add a new section titled "Query the Library via API" below the existing key management
+        panel. Show two code examples in a styled <pre> block:
+
+        curl example:
+          curl -H "Authorization: Bearer YOUR_API_KEY" \
+            "https://api.promptscorer.com/prompts/public?limit=20&sortBy=engagement"
+
+        JavaScript fetch example:
+          const res = await fetch('https://api.promptscorer.com/prompts/public?limit=20', {
+            headers: { Authorization: `Bearer ${apiKey}` }
+          });
+          const { items } = await res.json();
+
+        Use the API base URL from the existing api-config or environment config — do not hardcode. Show a note below the
+        snippets: "Authenticated API key requests return callerType: 'agent' in the response, confirming key-based
+        access."
+
+        3. Keep all existing key management UI (create, list, revoke) completely intact.
+    error: "Dependency failed: api-key-read-auth-public-prompts"
+    completed_at: 2026-03-17T01:22:49.116Z
+  - id: ui-agent-review-completion-polling
+    status: skipped
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: feature
+    context_files: &a2
+      - src/pages/ViewPromptPage.tsx
+      - src/components/AgentReviewControls.tsx
+      - src/services/api-service.ts
+    variables:
+      feature_name: agent review status badge and live completion polling
+      feature_description: >
+        The agent review pipeline posts a revision and comment automatically but the author has no visibility into
+        whether a review is pending, in-progress, or complete.
+
+        Add two things to ViewPromptPage.tsx:
+
+        1. STATUS BADGE: Add a small inline badge near the prompt title/metadata area. Badge states based on
+        agentReviewStatus.status (or agentReviewStatus?.status): - 'queued' or 'processing': pulsing amber badge "AI
+        Review Pending" - 'reviewed': green/teal badge with a sparkle icon "AI Reviewed" - null / undefined /
+        'dismissed': render nothing
+
+        2. LIVE POLLING: When agentReviewStatus.status is 'queued' or 'processing', poll GET
+        /prompts/{promptId}/agent-review/status-history every 8 seconds using setInterval. Stop polling when status
+        becomes 'reviewed' or 'dismissed', or on component unmount (clearInterval in useEffect cleanup). The current
+        status is the status field of the most recent entry in the history array returned by that endpoint. When status
+        transitions to 'reviewed', invalidate and refetch the main prompt data (using React Query's
+        queryClient.invalidateQueries or the existing refetch pattern) so the new agent revision and comment appear
+        automatically without a manual refresh.
+
+        Use the same fetch + Bearer token auth pattern already present in the component. Do NOT modify the
+        AgentReviewControls panel, tab structure, or any existing section. Only add the badge element and the polling
+        side-effect.
+    started_at: 2026-03-17T01:01:47.240Z
+    completed_at: 2026-03-17T01:09:27.985Z
+    branch: auto/ui-agent-review-completion-polling
+    merge_status: escalated
+    pr_number: 300
+    pr_url: https://github.com/PromptScorer/prompt-scorer-ui/pull/300
+    merge_attempts: 0
+    issue_url: https://github.com/PromptScorer/prompt-scorer-ui/issues/301
+    error: Re-queued as retry-ui-agent-review-completion-polling
+  - id: add-collection-engagement-score-endpoint
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-api
+    task_type: feature
+    context_files:
+      - src/handlers/collections/get.js
+      - src/models/collections.js
+    variables:
+      feature_name: Collection Engagement Score API Endpoint
+      feature_description: >
+        Add /api/collections/{collectionId}/engagement-score endpoint to retrieve the engagement score for a specific
+        collection, incorporating total comments and revisions.
+    started_at: 2026-03-17T01:09:29.045Z
+    completed_at: 2026-03-17T01:13:53.088Z
+    branch: auto/add-collection-engagement-score-endpoint
+    merge_status: merged
+    pr_number: 282
+    pr_url: https://github.com/PromptScorer/prompt-scorer-sls-api/pull/282
+    merge_attempts: 1
+  - id: build-engagement-score-ui
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: feature
+    depends_on:
+      - add-collection-engagement-score-endpoint
+    context_files:
+      - src/components/collection/EngagementScoreCard.tsx
+    variables:
+      feature_name: Engagement Score UI Component
+      feature_description: >
+        Build a new UI component that displays the engagement score of a collection. This component will fetch data from
+        the new engagement score API and showcase total comments and revisions.
+    started_at: 2026-03-17T01:14:07.027Z
+    completed_at: 2026-03-17T01:15:52.468Z
+    branch: auto/build-engagement-score-ui
+    merge_status: merged
+    pr_number: 302
+    pr_url: https://github.com/PromptScorer/prompt-scorer-ui/pull/302
+    merge_attempts: 1
+  - id: add-prompt-validation-tests
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-write-test.md
+    project: prompt-scorer-api
+    task_type: maintenance
+    context_files:
+      - src/utils/promptValidator.js
+    variables:
+      test_target: src/utils/promptValidator.js
+      test_description: >
+        Write unit tests for the prompt validation utility, ensuring all edge cases are handled and the prompt text is
+        validated according to the specified rules.
+    started_at: 2026-03-17T01:15:53.561Z
+    completed_at: 2026-03-17T01:16:15.080Z
+    branch: auto/add-prompt-validation-tests
+    merge_status: merged
+    pr_number: 283
+    pr_url: https://github.com/PromptScorer/prompt-scorer-sls-api/pull/283
+    merge_attempts: 1
+  - id: fix-user-prompt-summary-loading-state
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-modify-file.md
+    project: prompt-scorer-ui
+    task_type: maintenance
+    context_files:
+      - src/components/UserPromptSummary.tsx
+    variables:
+      modification_description: >
+        Ensure the loading state for user prompt summary properly shows a skeleton while data is being fetched from the
+        API to enhance UX.
+    started_at: 2026-03-17T01:16:16.180Z
+    completed_at: 2026-03-17T01:19:36.573Z
+    branch: auto/fix-user-prompt-summary-loading-state
+    merge_status: merged
+    pr_number: 303
+    pr_url: https://github.com/PromptScorer/prompt-scorer-ui/pull/303
+    merge_attempts: 1
+  - id: validate-prompt-iteration-response
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-write-test.md
+    project: prompt-scorer-api
+    task_type: maintenance
+    context_files:
+      - src/handlers/prompts/iterate.js
+    variables:
+      test_target: src/handlers/prompts/iterate.js
+      test_description: >
+        Write tests for the iterate prompt handler to validate the output structure and ensure proper handling of AI
+        analysis results.
+    started_at: 2026-03-17T01:19:37.689Z
+    completed_at: 2026-03-17T01:20:07.237Z
+    branch: auto/validate-prompt-iteration-response
+    merge_status: merged
+    pr_number: 284
+    pr_url: https://github.com/PromptScorer/prompt-scorer-sls-api/pull/284
+    merge_attempts: 1
+  - id: wire-consume-new-collection-revisions-endpoint
+    status: completed
+    workflow: auto
+    prompt: prompts/auto-modify-file.md
+    project: prompt-scorer-ui
+    task_type: wiring
+    context_files:
+      - src/pages/RevisionsLeaderboard.tsx
+    variables:
+      modification_description: >
+        Update the fetch call in RevisionsLeaderboard.tsx to call the new '/revisions/top' API endpoint to retrieve the
+        top revisions data based on the provided filters (status, sortBy, limit, etc.). Ensure that the new parameters
+        from the frontend are utilized accordingly to pass filters and sorting options.
+    started_at: 2026-03-17T01:20:08.274Z
+    completed_at: 2026-03-17T01:22:48.016Z
+    branch: auto/wire-consume-new-collection-revisions-endpoint
+    merge_status: merged
+    pr_number: 304
+    pr_url: https://github.com/PromptScorer/prompt-scorer-ui/pull/304
+    merge_attempts: 1
+  - id: retry-api-key-read-auth-public-prompts
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-api
+    task_type: feature
+    context_files: *a1
+    variables:
+      feature_name: optional API key authentication on GET /prompts/public
+      feature_description: >
+        Update src/handlers/prompts/getPublic.js to support optional API key auth so external developers can query the
+        public prompt library programmatically.
+
+        When an Authorization: Bearer ps_sk_* header is present: 1. STRICT FORMAT VALIDATION FIRST: Before any DynamoDB
+        lookup, validate the token format strictly.
+           The key must match the exact regex /^ps_sk_[A-Za-z0-9]{32,64}$/ — reject anything that does not
+           match with 401: { error: 'Invalid or revoked API key' }. This prevents arbitrary strings from
+           reaching the database lookup.
+        2. Look up the validated key in DynamoDB using the same pattern already used in
+           src/handlers/apiKeys/manage.js (query the api-keys table by keyHash or agentId).
+        3. If the key is found and not revoked, the request proceeds normally with agent context attached.
+           Include callerType: 'agent' and agentId in the top-level response JSON.
+           Also add a response header: x-authenticated-as: agent.
+        4. If the key is invalid, not found, or revoked, return 401: { error: 'Invalid or revoked API key' }.
+           Always return the same generic message regardless of reason — do not distinguish between
+           "not found" and "revoked" to avoid key enumeration.
+
+        SECURITY REQUIREMENTS (previous attempt was rejected for violating these — do not skip them): -
+        touchApiKeyLastUsed MUST be wrapped in its own try/catch so a failure updating lastUsedAt never
+          causes the request to fail or leak an error. Log the error silently and let the request succeed.
+        - touchApiKeyLastUsed MUST only be called AFTER the key has been confirmed valid and not revoked.
+          Never update lastUsedAt on an invalid key.
+        - The lastUsedAt update is fire-and-forget (do not await it in the main request path). This avoids
+          any latency hit and makes the race condition on concurrent requests irrelevant.
+
+        When no Authorization header is present, existing behavior is completely unchanged — unauthenticated public
+        access still works as before.
+
+        Use AWS SDK v3 DynamoDB DocumentClient (require('@aws-sdk/lib-dynamodb')) to match the existing codebase
+        pattern. Do NOT add or modify any route definitions in resources/functions.yml — the endpoint already exists
+        without an authorizer.
+      previous_escalation_reason: "Critical review concerns: CRITICAL: The touchLastUsed function doesn't have its failures
+        handled properly. This could create issues if the function is expected to be idempotent.; The implementation
+        lacks comprehensive logging or error handling for the user ID extraction and authorization context parsing,
+        which may hide issues during execution.; It could benefit from additional unit tests to validate the new
+        authentication flow."
+      retry_of: api-key-read-auth-public-prompts
+  - id: retry-ui-agent-review-completion-polling
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: feature
+    context_files: *a2
+    variables:
+      feature_name: agent review status badge and live completion polling
+      feature_description: >
+        The agent review pipeline posts a revision and comment automatically but the author has no visibility into
+        whether a review is pending, in-progress, or complete.
+
+        Add two things to ViewPromptPage.tsx:
+
+        1. STATUS BADGE: Add a small inline badge near the prompt title/metadata area. Badge states based on
+        agentReviewStatus.status (or agentReviewStatus?.status): - 'queued' or 'processing': pulsing amber badge "AI
+        Review Pending" - 'reviewed': green/teal badge with a sparkle icon "AI Reviewed" - null / undefined /
+        'dismissed': render nothing
+
+        2. LIVE POLLING: When agentReviewStatus.status is 'queued' or 'processing', poll GET
+        /prompts/{promptId}/agent-review/status-history every 8 seconds using setInterval. Stop polling when status
+        becomes 'reviewed' or 'dismissed', or on component unmount (clearInterval in useEffect cleanup). The current
+        status is the status field of the most recent entry in the history array returned by that endpoint. When status
+        transitions to 'reviewed', invalidate and refetch the main prompt data (using React Query's
+        queryClient.invalidateQueries or the existing refetch pattern) so the new agent revision and comment appear
+        automatically without a manual refresh.
+
+        Use the same fetch + Bearer token auth pattern already present in the component. Do NOT modify the
+        AgentReviewControls panel, tab structure, or any existing section. Only add the badge element and the polling
+        side-effect.
+
+        MANDATORY — previous escalation fixed these exact issues, ALL THREE must be addressed:
+
+        1. ERROR HANDLING: Wrap the polling fetch call in a try/catch. On error, log to console and do NOT throw —
+        the polling must continue silently if a request fails transiently. Never let an unhandled promise rejection
+        propagate from the polling interval.
+
+        2. TYPE SAFETY: Do NOT use `any`. Define a typed interface for the status history entry, e.g.:
+        `interface AgentReviewHistoryEntry { status: string; timestamp?: string; }`.
+        Use `unknown` + a type guard or cast to the interface for the fetch response. No implicit `any` anywhere.
+
+        3. MEMORY LEAK PREVENTION: Store the interval ID in a `useRef<ReturnType<typeof setInterval> | null>`.
+        The useEffect cleanup function MUST call `clearInterval` on that ref. Also set an `isMounted` ref (or
+        use an AbortController) so that if the component unmounts while a fetch is in flight, the state setter
+        is never called on the unmounted component.
+      retry_of: ui-agent-review-completion-polling
+  - id: wire-consume-engagement-score-endpoint
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-modify-file.md
+    project: prompt-scorer-ui
+    task_type: wiring
+    context_files:
+      - src/hooks/use-collection-engagement-score.ts
+      - src/components/collections/CollectionEngagementScoreCard.tsx
+    variables:
+      modification_description: >
+        Update the hook `useCollectionEngagementScore` to ensure  it correctly fetches data from the
+        `/collections/{collectionId}/engagement-score`  endpoint that was recently added in the API.  Specify the
+        integration point in the hook to retrieve engagement score data  when the component is rendered.
+  - id: wire-route-engagement-score-use-in-collection-card
+    status: pending
+    workflow: auto
+    prompt: prompts/auto-implement.md
+    project: prompt-scorer-ui
+    task_type: wiring
+    context_files:
+      - src/components/collections/CollectionEngagementScoreCard.tsx
+    variables:
+      feature_description: >
+        Integrate CollectionEngagementScoreCard in the relevant collection display  component (PublicCollectionCard) to
+        ensure that engagement scores are shown  alongside the collections.
