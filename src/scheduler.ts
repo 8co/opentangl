@@ -14,19 +14,30 @@
  *   - Queue state is always committed to the orchestrator repo.
  */
 
-import { resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { parse as parseYaml } from 'yaml';
-import { createQueueManager, type QueueTask } from './queue-manager.js';
-import { createAutonomousRunner, type AutoStep, type AutoWorkflow } from './autonomous-runner.js';
-import { runVerification, defaultVerifyCommands, verifyCommandsForProject } from './verify-runner.js';
-import { buildFileContext, buildReferenceContext } from './file-writer.js';
-import { createMergePipeline, type BranchMergeInput } from './merge-pipeline.js';
-import { commitQueueState, syncMainFromRemote } from './git-ops.js';
-import type { AgentAdapter, AgentRequest, AgentType } from './types.js';
-import type { ProjectConfig, ProjectRegistry } from './project-registry.js';
-import { getProfile, getLanguageVarsFromProfile } from './project-profiles.js';
+import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { parse as parseYaml } from "yaml";
+import { createQueueManager, type QueueTask } from "./queue-manager.js";
+import {
+  createAutonomousRunner,
+  type AutoStep,
+  type AutoWorkflow,
+} from "./autonomous-runner.js";
+import {
+  runVerification,
+  defaultVerifyCommands,
+  verifyCommandsForProject,
+} from "./verify-runner.js";
+import { buildFileContext, buildReferenceContext } from "./file-writer.js";
+import {
+  createMergePipeline,
+  type BranchMergeInput,
+} from "./merge-pipeline.js";
+import { commitQueueState, syncMainFromRemote } from "./git-ops.js";
+import type { AgentAdapter, AgentRequest, AgentType } from "./types.js";
+import type { ProjectConfig, ProjectRegistry } from "./project-registry.js";
+import { getProfile, getLanguageVarsFromProfile } from "./project-profiles.js";
 
 // --- Import rules formatting ---
 
@@ -41,14 +52,14 @@ interface ImportRule {
  * Returns empty string if no rules are defined.
  */
 function formatImportRules(importRules?: ImportRule[]): string {
-  if (!importRules || importRules.length === 0) return '';
+  if (!importRules || importRules.length === 0) return "";
 
   const lines: string[] = [
-    '=== CRITICAL: Import & API Rules (version-specific) ===',
-    '',
-    'These rules reflect the EXACT library versions installed in this project.',
-    'Violating them causes runtime errors that may pass build checks.',
-    '',
+    "=== CRITICAL: Import & API Rules (version-specific) ===",
+    "",
+    "These rules reflect the EXACT library versions installed in this project.",
+    "Violating them causes runtime errors that may pass build checks.",
+    "",
   ];
 
   for (const rule of importRules) {
@@ -56,24 +67,33 @@ function formatImportRules(importRules?: ImportRule[]): string {
     for (const r of rule.rules) {
       lines.push(`- ${r}`);
     }
-    lines.push('');
+    lines.push("");
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
  * Run a git command and return stdout.
  */
-function gitCmd(args: string[], cwd: string): Promise<{ success: boolean; output: string }> {
+function gitCmd(
+  args: string[],
+  cwd: string,
+): Promise<{ success: boolean; output: string }> {
   return new Promise((res) => {
-    let stdout = '';
-    let stderr = '';
-    const proc = spawn('git', args, { cwd, shell: false });
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-    proc.on('close', (code) => res({ success: code === 0, output: (stdout + stderr).trim() }));
-    proc.on('error', (e) => res({ success: false, output: e.message }));
+    let stdout = "";
+    let stderr = "";
+    const proc = spawn("git", args, { cwd, shell: false });
+    proc.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString();
+    });
+    proc.on("close", (code) =>
+      res({ success: code === 0, output: (stdout + stderr).trim() }),
+    );
+    proc.on("error", (e) => res({ success: false, output: e.message }));
   });
 }
 
@@ -81,19 +101,26 @@ function gitCmd(args: string[], cwd: string): Promise<{ success: boolean; output
  * Extract the "### Known Issues" section from a vision file.
  * Returns the bullet-point content (without the heading), or null if not found.
  */
-async function loadKnownIssues(orchestratorRoot: string, environment: string): Promise<string | null> {
-  const visionPath = resolve(orchestratorRoot, `docs/environments/${environment}/product-vision.md`);
+async function loadKnownIssues(
+  orchestratorRoot: string,
+  environment: string,
+): Promise<string | null> {
+  const visionPath = resolve(
+    orchestratorRoot,
+    `docs/environments/${environment}/product-vision.md`,
+  );
   try {
-    const content = await readFile(visionPath, 'utf-8');
-    const heading = '### Known Issues';
+    const content = await readFile(visionPath, "utf-8");
+    const heading = "### Known Issues";
     const startIdx = content.indexOf(heading);
     if (startIdx === -1) return null;
 
     const afterHeading = content.slice(startIdx + heading.length);
     const nextSection = afterHeading.search(/\n###?\s/);
-    const section = nextSection !== -1
-      ? afterHeading.slice(0, nextSection).trim()
-      : afterHeading.trim();
+    const section =
+      nextSection !== -1
+        ? afterHeading.slice(0, nextSection).trim()
+        : afterHeading.trim();
 
     return section || null;
   } catch {
@@ -111,14 +138,14 @@ export interface SchedulerConfig {
   queuePath?: string;
   pollIntervalMs?: number; // For watch mode (default: 5 minutes)
   projectConfig?: ProjectConfig; // Single project (backward compat)
-  registry?: ProjectRegistry;    // Full registry for multi-project task resolution
-  onTaskStart?: (taskId: string) => void;  // Called when a task begins execution
-  onTaskEnd?: (taskId: string) => void;    // Called when a task finishes (success or fail)
+  registry?: ProjectRegistry; // Full registry for multi-project task resolution
+  onTaskStart?: (taskId: string) => void; // Called when a task begins execution
+  onTaskEnd?: (taskId: string) => void; // Called when a task finishes (success or fail)
 }
 
 interface TaskRunResult {
   taskId: string;
-  projectId: string;       // Which project was targeted
+  projectId: string; // Which project was targeted
   success: boolean;
   error?: string;
   durationMs: number;
@@ -138,8 +165,10 @@ export interface LoopResult {
  * Uses project-profiles for consistent defaults per project type.
  * Falls back to TypeScript defaults if profile not found.
  */
-function getLanguageVars(projectConfig?: ProjectConfig): Record<string, string> {
-  const projectType = projectConfig?.type ?? 'typescript-node';
+function getLanguageVars(
+  projectConfig?: ProjectConfig,
+): Record<string, string> {
+  const projectType = projectConfig?.type ?? "typescript-node";
   const profile = getProfile(projectType);
 
   if (profile) {
@@ -148,11 +177,12 @@ function getLanguageVars(projectConfig?: ProjectConfig): Record<string, string> 
 
   // Fallback: TypeScript defaults
   return {
-    language: 'TypeScript',
-    code_lang: 'typescript',
-    file_ext: 'ts',
-    module_system: 'ES modules (import/export, .js extensions in imports)',
-    language_instructions: 'TypeScript strict mode — no `any`, no implicit types.',
+    language: "TypeScript",
+    code_lang: "typescript",
+    file_ext: "ts",
+    module_system: "ES modules (import/export, .js extensions in imports)",
+    language_instructions:
+      "TypeScript strict mode — no `any`, no implicit types.",
   };
 }
 
@@ -176,15 +206,20 @@ export function createScheduler(config: SchedulerConfig) {
    * Resolve the project config for a task.
    * Falls back to orchestrator defaults when no project is specified.
    */
-  function resolveProject(task: QueueTask): { projectConfig: ProjectConfig | undefined; projectId: string } {
+  function resolveProject(task: QueueTask): {
+    projectConfig: ProjectConfig | undefined;
+    projectId: string;
+  } {
     if (task.project && registry) {
       const projectConfig = registry.get(task.project);
       if (projectConfig) {
         return { projectConfig, projectId: task.project };
       }
-      console.log(`  ⚠️  Unknown project "${task.project}", falling back to orchestrator`);
+      console.log(
+        `  ⚠️  Unknown project "${task.project}", falling back to orchestrator`,
+      );
     }
-    return { projectConfig: config.projectConfig, projectId: 'orchestrator' };
+    return { projectConfig: config.projectConfig, projectId: "orchestrator" };
   }
 
   /**
@@ -192,49 +227,65 @@ export function createScheduler(config: SchedulerConfig) {
    * For external projects, sets target_dir to the project's absolute path
    * and injects language-specific template variables.
    */
-  async function taskToWorkflow(task: QueueTask, projectConfig: ProjectConfig | undefined, projectId: string): Promise<{ workflow: AutoWorkflow; path: string }> {
+  async function taskToWorkflow(
+    task: QueueTask,
+    projectConfig: ProjectConfig | undefined,
+    projectId: string,
+  ): Promise<{ workflow: AutoWorkflow; path: string }> {
     const branchName = `auto/${task.id}`;
 
     // Inject language variables into the task's variables
     const langVars = getLanguageVars(projectConfig);
     const mergedVars: Record<string, string> = {
       ...langVars,
-      ...task.variables,  // Task-specific vars override defaults
+      ...task.variables, // Task-specific vars override defaults
     };
 
     // Inject import rules (version-specific API constraints)
-    const importRulesText = formatImportRules(projectConfig?.import_rules as ImportRule[] | undefined);
+    const importRulesText = formatImportRules(
+      projectConfig?.import_rules as ImportRule[] | undefined,
+    );
     if (importRulesText) {
-      mergedVars['import_rules'] = importRulesText;
+      mergedVars["import_rules"] = importRulesText;
     }
 
     // Build cross-project reference context (if configured)
     if (projectConfig?.reference_context && registry) {
-      const refContext = await buildReferenceContext(projectConfig.reference_context, registry);
+      const refContext = await buildReferenceContext(
+        projectConfig.reference_context,
+        registry,
+      );
       if (refContext) {
-        mergedVars['reference_context'] = refContext;
+        mergedVars["reference_context"] = refContext;
       }
     }
 
     // Inject Known Issues from the environment's vision file so the code-writing LLM avoids past mistakes
     if (projectConfig?.environment) {
-      const knownIssues = await loadKnownIssues(basePath, projectConfig.environment);
+      const knownIssues = await loadKnownIssues(
+        basePath,
+        projectConfig.environment,
+      );
       if (knownIssues) {
-        mergedVars['known_issues'] = knownIssues;
+        mergedVars["known_issues"] = knownIssues;
       }
     }
 
     // Auto-include router file when task targets pages directory
     let contextFiles = task.context_files ? [...task.context_files] : undefined;
-    const projectType = projectConfig?.type ?? 'typescript-node';
+    const projectType = projectConfig?.type ?? "typescript-node";
     const profile = getProfile(projectType);
 
-    if (profile?.routerFile && contextFiles?.some(f => f.startsWith('src/pages/'))) {
+    if (
+      profile?.routerFile &&
+      contextFiles?.some((f) => f.startsWith("src/pages/"))
+    ) {
       if (!contextFiles.includes(profile.routerFile)) {
         contextFiles.push(profile.routerFile);
         // Tell the LLM explicitly to register any new pages
-        if (mergedVars['feature_description']) {
-          mergedVars['feature_description'] += '\n\nIMPORTANT: If you create a new page component, you MUST also update the router file to add a <Route> for it. The router file is included in the context below.';
+        if (mergedVars["feature_description"]) {
+          mergedVars["feature_description"] +=
+            "\n\nIMPORTANT: If you create a new page component, you MUST also update the router file to add a <Route> for it. The router file is included in the context below.";
         }
       }
     }
@@ -250,14 +301,13 @@ export function createScheduler(config: SchedulerConfig) {
         ? verifyCommandsForProject(projectConfig.verify)
         : undefined,
       // Maintenance tasks are low-stakes edits — use the cheaper model
-      useLite: task.task_type === 'maintenance',
+      useLite: task.task_type === "maintenance",
     };
 
     // For external projects, use their absolute path as target_dir
     // resolve() returns the absolute path unchanged if it's already absolute
-    const targetDir = (projectConfig && projectId !== 'orchestrator')
-      ? projectConfig.path
-      : '.';
+    const targetDir =
+      projectConfig && projectId !== "orchestrator" ? projectConfig.path : ".";
 
     const workflow: AutoWorkflow = {
       name: task.id,
@@ -268,14 +318,14 @@ export function createScheduler(config: SchedulerConfig) {
       projectId,
     };
 
-    return { workflow, path: '' };
+    return { workflow, path: "" };
   }
 
   /**
    * Check if a task uses the plan workflow template.
    */
   function isPlanTask(task: QueueTask): boolean {
-    return task.prompt === 'prompts/auto-plan-feature.md';
+    return task.prompt === "prompts/auto-plan-feature.md";
   }
 
   /**
@@ -285,7 +335,7 @@ export function createScheduler(config: SchedulerConfig) {
   async function decomposePlanTask(
     task: QueueTask,
     projectConfig: ProjectConfig | undefined,
-    projectId: string
+    projectId: string,
   ): Promise<AutoWorkflow | null> {
     const agentName = defaultAgent;
     const adapter = adapters[agentName];
@@ -298,55 +348,63 @@ export function createScheduler(config: SchedulerConfig) {
     const mergedVars: Record<string, string> = {
       ...langVars,
       ...task.variables,
-      project_name: projectConfig?.name ?? 'project',
+      project_name: projectConfig?.name ?? "project",
     };
 
     // Load the plan prompt template
     const templatePath = resolve(basePath, task.prompt);
     let template: string;
     try {
-      template = await readFile(templatePath, 'utf-8');
+      template = await readFile(templatePath, "utf-8");
     } catch {
       console.log(`  ❌ Plan template not found: ${templatePath}`);
       return null;
     }
 
     // Resolve variables in the template
-    let prompt = template.replace(/\{\{(\s*[\w.]+\s*)\}\}/g, (_match, key: string) => {
-      const trimmed = key.trim();
-      return mergedVars[trimmed] ?? `{{${trimmed}}}`;
-    });
+    let prompt = template.replace(
+      /\{\{(\s*[\w.]+\s*)\}\}/g,
+      (_match, key: string) => {
+        const trimmed = key.trim();
+        return mergedVars[trimmed] ?? `{{${trimmed}}}`;
+      },
+    );
 
     // Build file context if context_files are specified
-    const targetDir = (projectConfig && projectId !== 'orchestrator')
-      ? projectConfig.path
-      : basePath;
+    const targetDir =
+      projectConfig && projectId !== "orchestrator"
+        ? projectConfig.path
+        : basePath;
 
     if (task.context_files && task.context_files.length > 0) {
       const context = await buildFileContext(task.context_files, targetDir);
       if (context) {
-        prompt = prompt.replace('{{file_context}}', context);
+        prompt = prompt.replace("{{file_context}}", context);
       } else {
-        prompt = prompt.replace('{{file_context}}', '(no files provided)');
+        prompt = prompt.replace("{{file_context}}", "(no files provided)");
       }
     } else {
-      prompt = prompt.replace('{{file_context}}', '(no files provided)');
+      prompt = prompt.replace("{{file_context}}", "(no files provided)");
     }
 
-    console.log('  🧠 Running plan decomposition...');
+    console.log("  🧠 Running plan decomposition...");
 
     const request: AgentRequest = { prompt };
     const response = await adapter.execute(request);
 
     if (!response.success || !response.output) {
-      console.log(`  ❌ Planning LLM call failed: ${response.error ?? 'no output'}`);
+      console.log(
+        `  ❌ Planning LLM call failed: ${response.error ?? "no output"}`,
+      );
       return null;
     }
 
     // Parse the plan YAML from the LLM output
-    const yamlMatch = response.output.match(/```(?:yaml:plan|yaml)\n([\s\S]*?)```/);
+    const yamlMatch = response.output.match(
+      /```(?:yaml:plan|yaml)\n([\s\S]*?)```/,
+    );
     if (!yamlMatch) {
-      console.log('  ❌ No plan YAML block found in LLM output');
+      console.log("  ❌ No plan YAML block found in LLM output");
       return null;
     }
 
@@ -361,11 +419,11 @@ export function createScheduler(config: SchedulerConfig) {
       const parsed = parseYaml(yamlMatch[1]) as { steps: typeof planSteps };
       planSteps = parsed.steps;
       if (!Array.isArray(planSteps) || planSteps.length === 0) {
-        console.log('  ❌ Plan contained no steps');
+        console.log("  ❌ Plan contained no steps");
         return null;
       }
     } catch {
-      console.log('  ❌ Failed to parse plan YAML');
+      console.log("  ❌ Failed to parse plan YAML");
       return null;
     }
 
@@ -394,9 +452,10 @@ export function createScheduler(config: SchedulerConfig) {
     const workflow: AutoWorkflow = {
       name: task.id,
       description: `Planned feature: ${task.id}`,
-      target_dir: (projectConfig && projectId !== 'orchestrator')
-        ? projectConfig.path
-        : '.',
+      target_dir:
+        projectConfig && projectId !== "orchestrator"
+          ? projectConfig.path
+          : ".",
       branch: branchName,
       steps: autoSteps,
       projectId,
@@ -412,17 +471,18 @@ export function createScheduler(config: SchedulerConfig) {
     const start = Date.now();
     const { projectConfig, projectId } = resolveProject(task);
 
-    const isExternal = projectId !== 'orchestrator';
-    const targetPath = (isExternal && projectConfig)
-      ? projectConfig.path
-      : basePath;
+    const isExternal = projectId !== "orchestrator";
+    const targetPath =
+      isExternal && projectConfig ? projectConfig.path : basePath;
 
-    console.log('\n' + '━'.repeat(50));
+    console.log("\n" + "━".repeat(50));
     console.log(`📌 Task: ${task.id}`);
     if (isExternal) {
-      console.log(`📁 Project: ${projectConfig?.name ?? projectId} (${targetPath})`);
+      console.log(
+        `📁 Project: ${projectConfig?.name ?? projectId} (${targetPath})`,
+      );
     }
-    console.log('━'.repeat(50));
+    console.log("━".repeat(50));
 
     await queue.markRunning(task.id);
     config.onTaskStart?.(task.id);
@@ -438,7 +498,9 @@ export function createScheduler(config: SchedulerConfig) {
       if (isExternal) {
         const syncResult = await syncMainFromRemote(targetPath);
         if (!syncResult.success) {
-          console.log(`  ⚠️  Main sync failed for ${targetPath} — task may branch from stale main`);
+          console.log(
+            `  ⚠️  Main sync failed for ${targetPath} — task may branch from stale main`,
+          );
         }
       }
 
@@ -447,36 +509,40 @@ export function createScheduler(config: SchedulerConfig) {
       if (isPlanTask(task)) {
         const planned = await decomposePlanTask(task, projectConfig, projectId);
         if (!planned) {
-          await queue.markFailed(task.id, 'Plan decomposition failed');
+          await queue.markFailed(task.id, "Plan decomposition failed");
           config.onTaskEnd?.(task.id);
           return {
             taskId: task.id,
             projectId,
             success: false,
-            error: 'Plan decomposition failed',
+            error: "Plan decomposition failed",
             durationMs: Date.now() - start,
           };
         }
         workflow = planned;
       } else {
-        workflow = (await taskToWorkflow(task, projectConfig, projectId)).workflow;
+        workflow = (await taskToWorkflow(task, projectConfig, projectId))
+          .workflow;
       }
 
       // Write a temporary workflow file (always in orchestrator)
-      const tempWorkflowPath = resolve(basePath, `.tmp-workflow-${task.id}.yaml`);
-      const { writeFile: writeFs } = await import('node:fs/promises');
-      const { stringify: stringifyYaml } = await import('yaml');
-      await writeFs(tempWorkflowPath, stringifyYaml(workflow), 'utf-8');
+      const tempWorkflowPath = resolve(
+        basePath,
+        `.tmp-workflow-${task.id}.yaml`,
+      );
+      const { writeFile: writeFs } = await import("node:fs/promises");
+      const { stringify: stringifyYaml } = await import("yaml");
+      await writeFs(tempWorkflowPath, stringifyYaml(workflow), "utf-8");
 
       // Run the workflow
       // basePath is still the orchestrator root (for prompt template resolution)
       const result = await runner.run(tempWorkflowPath, basePath);
 
       // Clean up temp file
-      const { unlink } = await import('node:fs/promises');
+      const { unlink } = await import("node:fs/promises");
       await unlink(tempWorkflowPath).catch(() => {});
 
-      if (result.status === 'completed') {
+      if (result.status === "completed") {
         await queue.markCompleted(task.id, result.branch);
         config.onTaskEnd?.(task.id);
         return {
@@ -487,7 +553,9 @@ export function createScheduler(config: SchedulerConfig) {
           branch: result.branch,
         };
       } else {
-        const error = result.steps.find((s) => s.status === 'failed')?.error ?? 'Unknown error';
+        const error =
+          result.steps.find((s) => s.status === "failed")?.error ??
+          "Unknown error";
         await queue.markFailed(task.id, error);
         config.onTaskEnd?.(task.id);
         return {
@@ -526,8 +594,8 @@ export function createScheduler(config: SchedulerConfig) {
    */
   async function mergeInline(
     result: TaskRunResult,
-    mergePipeline: ReturnType<typeof createMergePipeline>
-  ): Promise<'merged' | 'escalated' | 'failed'> {
+    mergePipeline: ReturnType<typeof createMergePipeline>,
+  ): Promise<"merged" | "escalated" | "failed"> {
     const input: BranchMergeInput = {
       taskId: result.taskId,
       branch: result.branch as string,
@@ -542,7 +610,7 @@ export function createScheduler(config: SchedulerConfig) {
 
     // After a successful PR merge on remote, sync the project's local main
     // so subsequent branches are created from the latest state.
-    if (mergeResult.status === 'merged') {
+    if (mergeResult.status === "merged") {
       const projectConfig = registry?.get(result.projectId);
       const projectPath = projectConfig?.path;
       if (projectPath) {
@@ -551,7 +619,10 @@ export function createScheduler(config: SchedulerConfig) {
     }
 
     // Commit queue state after merge (targeted — only queue files)
-    await commitQueueState(basePath, `Queue: post-merge ${result.taskId} — ${mergeResult.status}`);
+    await commitQueueState(
+      basePath,
+      `Queue: post-merge ${result.taskId} — ${mergeResult.status}`,
+    );
 
     return mergeResult.status;
   }
@@ -562,7 +633,9 @@ export function createScheduler(config: SchedulerConfig) {
    * Tasks with dependents are merged immediately so blocked tasks can proceed.
    * Tasks without dependents are deferred for batch merge at the end.
    */
-  async function runPendingTasks(mergePipeline: ReturnType<typeof createMergePipeline> | null): Promise<LoopResult> {
+  async function runPendingTasks(
+    mergePipeline: ReturnType<typeof createMergePipeline> | null,
+  ): Promise<LoopResult> {
     const results: TaskRunResult[] = [];
     const inlineMerged = new Set<string>();
     let totalMerged = 0;
@@ -582,15 +655,19 @@ export function createScheduler(config: SchedulerConfig) {
       if (result.success && result.branch && mergePipeline) {
         const hasDeps = await queue.hasDependents(result.taskId);
         if (hasDeps) {
-          console.log(`\n🔗 Task "${task.id}" has dependents — merging inline to unblock them`);
+          console.log(
+            `\n🔗 Task "${task.id}" has dependents — merging inline to unblock them`,
+          );
           const mergeStatus = await mergeInline(result, mergePipeline);
           inlineMerged.add(result.taskId);
 
-          if (mergeStatus === 'merged') totalMerged++;
-          else if (mergeStatus === 'escalated') totalEscalated++;
+          if (mergeStatus === "merged") totalMerged++;
+          else if (mergeStatus === "escalated") totalEscalated++;
 
-          if (mergeStatus !== 'merged') {
-            console.log(`  ⚠️  Inline merge ${mergeStatus} — dependent tasks will be skipped`);
+          if (mergeStatus !== "merged") {
+            console.log(
+              `  ⚠️  Inline merge ${mergeStatus} — dependent tasks will be skipped`,
+            );
           }
         }
       }
@@ -611,7 +688,10 @@ export function createScheduler(config: SchedulerConfig) {
     if (deferredBranches.length > 0 && mergePipeline) {
       const passed = results.filter((r) => r.success).length;
       const failed = results.filter((r) => !r.success).length;
-      await commitQueueState(basePath, `Queue: batch complete — ${passed} passed, ${failed} failed`);
+      await commitQueueState(
+        basePath,
+        `Queue: batch complete — ${passed} passed, ${failed} failed`,
+      );
 
       const mergeResults = await mergePipeline.run(deferredBranches);
       totalMerged += mergeResults.merged;
@@ -629,14 +709,19 @@ export function createScheduler(config: SchedulerConfig) {
         }
       }
 
-      await commitQueueState(basePath, `Queue: merge pipeline — ${mergeResults.merged} merged, ${mergeResults.escalated} escalated`);
+      await commitQueueState(
+        basePath,
+        `Queue: merge pipeline — ${mergeResults.merged} merged, ${mergeResults.escalated} escalated`,
+      );
     }
 
     // Post-execution orphan audit: catch any tasks that completed during this
     // run but were silently missed by the merge pipeline.
     const postOrphanCount = await queue.auditOrphanedTasks();
     if (postOrphanCount > 0) {
-      console.log(`\n⚠️  Post-execution audit: ${postOrphanCount} orphaned task(s) — marked as failed`);
+      console.log(
+        `\n⚠️  Post-execution audit: ${postOrphanCount} orphaned task(s) — marked as failed`,
+      );
     }
 
     return { tasks: results, merged: totalMerged, escalated: totalEscalated };
@@ -649,7 +734,7 @@ export function createScheduler(config: SchedulerConfig) {
     async next(): Promise<TaskRunResult | null> {
       const task = await queue.next();
       if (!task) {
-        console.log('\n✅ No pending tasks in queue.');
+        console.log("\n✅ No pending tasks in queue.");
         return null;
       }
       return runTask(task);
@@ -664,31 +749,40 @@ export function createScheduler(config: SchedulerConfig) {
       // Detect orphaned tasks (completed with branch but no merge_status)
       const orphanCount = await queue.auditOrphanedTasks();
       if (orphanCount > 0) {
-        console.log(`\n⚠️  Found ${orphanCount} orphaned task(s) — marked as failed`);
+        console.log(
+          `\n⚠️  Found ${orphanCount} orphaned task(s) — marked as failed`,
+        );
       }
 
       // Prune terminal tasks before running to keep the queue lean
       const pruneResult = await queue.prune();
       if (pruneResult.removed > 0) {
-        console.log(`\n🧹 Pruned ${pruneResult.removed} terminal task(s), ${pruneResult.kept} remaining`);
-        await commitQueueState(basePath, `Queue: prune ${pruneResult.removed} terminal tasks`);
+        console.log(
+          `\n🧹 Pruned ${pruneResult.removed} terminal task(s), ${pruneResult.kept} remaining`,
+        );
+        await commitQueueState(
+          basePath,
+          `Queue: prune ${pruneResult.removed} terminal tasks`,
+        );
       }
 
       const summary = await queue.summary();
 
-      console.log('\n' + '═'.repeat(50));
-      console.log('🔄 SCHEDULER — LOOP MODE');
-      console.log('═'.repeat(50));
+      console.log("\n" + "═".repeat(50));
+      console.log("🔄 SCHEDULER — LOOP MODE");
+      console.log("═".repeat(50));
       console.log(`   Pending tasks: ${summary.pending}`);
-      console.log('═'.repeat(50));
+      console.log("═".repeat(50));
 
-      const mergePipeline = registry ? createMergePipeline({
-        adapters,
-        defaultAgent,
-        liteAgent,
-        registry,
-        basePath,
-      }) : null;
+      const mergePipeline = registry
+        ? createMergePipeline({
+            adapters,
+            defaultAgent,
+            liteAgent,
+            registry,
+            basePath,
+          })
+        : null;
 
       const loopResult = await runPendingTasks(mergePipeline);
       const results = loopResult.tasks;
@@ -703,22 +797,25 @@ export function createScheduler(config: SchedulerConfig) {
       }
 
       // Post-batch health check (orchestrator only)
-      console.log('\n' + '─'.repeat(50));
-      console.log('🏥 POST-BATCH HEALTH CHECK');
-      console.log('─'.repeat(50));
+      console.log("\n" + "─".repeat(50));
+      console.log("🏥 POST-BATCH HEALTH CHECK");
+      console.log("─".repeat(50));
 
-      const healthCheck = await runVerification(defaultVerifyCommands(), basePath);
+      const healthCheck = await runVerification(
+        defaultVerifyCommands(),
+        basePath,
+      );
       if (healthCheck.allPassed) {
-        console.log('   ✅ Codebase is healthy — tsc passed');
+        console.log("   ✅ Codebase is healthy — tsc passed");
       } else {
-        console.log('   ⚠️  Codebase has issues after batch:');
+        console.log("   ⚠️  Codebase has issues after batch:");
         console.log(`   ${healthCheck.errorSummary?.slice(0, 200)}`);
       }
 
       // Print summary
-      console.log('\n' + '═'.repeat(50));
-      console.log('📊 BATCH COMPLETE');
-      console.log('═'.repeat(50));
+      console.log("\n" + "═".repeat(50));
+      console.log("📊 BATCH COMPLETE");
+      console.log("═".repeat(50));
 
       const passed = results.filter((r) => r.success).length;
       const failed = results.filter((r) => !r.success).length;
@@ -726,22 +823,31 @@ export function createScheduler(config: SchedulerConfig) {
 
       console.log(`   Tasks run: ${results.length}`);
       console.log(`   Passed: ${passed} | Failed: ${failed}`);
-      console.log(`   Merged: ${loopResult.merged} | Escalated: ${loopResult.escalated}`);
+      console.log(
+        `   Merged: ${loopResult.merged} | Escalated: ${loopResult.escalated}`,
+      );
       console.log(`   Total time: ${Math.round(totalMs / 1000)}s`);
-      console.log(`   Health:    ${healthCheck.allPassed ? '✅ clean' : '⚠️  issues detected'}`);
-      console.log('═'.repeat(50));
+      console.log(
+        `   Health:    ${healthCheck.allPassed ? "✅ clean" : "⚠️  issues detected"}`,
+      );
+      console.log("═".repeat(50));
 
       // Push queue state (targeted — only queue files)
       if (results.length > 0) {
-        await commitQueueState(basePath, `Queue: loop complete — ${passed} passed, ${failed} failed`);
-        const pushResult = await gitCmd(['push', 'origin', 'HEAD'], basePath);
+        await commitQueueState(
+          basePath,
+          `Queue: loop complete — ${passed} passed, ${failed} failed`,
+        );
+        const pushResult = await gitCmd(["push", "origin", "HEAD"], basePath);
         if (pushResult.success) {
-          console.log('   🚀 Queue state pushed to origin');
+          console.log("   🚀 Queue state pushed to origin");
         } else {
-          console.log(`   ⚠️  Queue push failed: ${pushResult.output.slice(0, 100)}`);
+          console.log(
+            `   ⚠️  Queue push failed: ${pushResult.output.slice(0, 100)}`,
+          );
         }
       } else {
-        console.log('\n   No tasks were executed.');
+        console.log("\n   No tasks were executed.");
       }
 
       await queue.print();
@@ -755,19 +861,21 @@ export function createScheduler(config: SchedulerConfig) {
      * Uses dependency-aware ordering with inline merging.
      */
     async watch(): Promise<void> {
-      console.log('\n' + '═'.repeat(50));
-      console.log('👁  SCHEDULER — WATCH MODE');
+      console.log("\n" + "═".repeat(50));
+      console.log("👁  SCHEDULER — WATCH MODE");
       console.log(`   Polling every ${Math.round(pollIntervalMs / 1000)}s`);
-      console.log('   Press Ctrl+C to stop');
-      console.log('═'.repeat(50));
+      console.log("   Press Ctrl+C to stop");
+      console.log("═".repeat(50));
 
-      const mergePipeline = registry ? createMergePipeline({
-        adapters,
-        defaultAgent,
-        liteAgent,
-        registry,
-        basePath,
-      }) : null;
+      const mergePipeline = registry
+        ? createMergePipeline({
+            adapters,
+            defaultAgent,
+            liteAgent,
+            registry,
+            basePath,
+          })
+        : null;
 
       // Initial run
       await runPendingTasks(mergePipeline);
@@ -779,14 +887,16 @@ export function createScheduler(config: SchedulerConfig) {
           console.log(`\n🔔 ${summary.pending} new task(s) found`);
           await runPendingTasks(mergePipeline);
         } else {
-          console.log(`⏳ ${new Date().toISOString()} — no pending tasks, waiting...`);
+          console.log(
+            `⏳ ${new Date().toISOString()} — no pending tasks, waiting...`,
+          );
         }
       }, pollIntervalMs);
 
       // Graceful shutdown
-      process.on('SIGINT', () => {
+      process.on("SIGINT", () => {
         clearInterval(interval);
-        console.log('\n\n👋 Scheduler stopped.');
+        console.log("\n\n👋 Scheduler stopped.");
         process.exit(0);
       });
 

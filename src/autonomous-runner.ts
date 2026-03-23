@@ -7,22 +7,22 @@
  * into actual codebase changes with automated verification.
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import type {
-  AgentAdapter,
-  AgentRequest,
-  AgentType,
-} from './types.js';
-import { parseCodeBlocks, writeFiles, buildFileContext } from './file-writer.js';
+import { v4 as uuidv4 } from "uuid";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
+import type { AgentAdapter, AgentRequest, AgentType } from "./types.js";
+import {
+  parseCodeBlocks,
+  writeFiles,
+  buildFileContext,
+} from "./file-writer.js";
 import {
   runVerification,
   defaultVerifyCommands,
   type VerifyCommand,
   type VerificationSummary,
-} from './verify-runner.js';
+} from "./verify-runner.js";
 import {
   commitChanges,
   revertChanges,
@@ -30,36 +30,36 @@ import {
   getChangedFiles,
   getCurrentBranch,
   createBranch,
-} from './git-ops.js';
+} from "./git-ops.js";
 
 // --- Types ---
 
 export interface AutoStep {
   id: string;
-  prompt: string;           // Path to prompt template
-  agent?: AgentType;        // Override agent for this step
-  useLite?: boolean;        // Use the lite (cheaper) model — for maintenance tasks
+  prompt: string; // Path to prompt template
+  agent?: AgentType; // Override agent for this step
+  useLite?: boolean; // Use the lite (cheaper) model — for maintenance tasks
   context_files?: string[]; // Project files to include as context
   verify?: VerifyCommand[]; // Custom verification commands (defaults to tsc)
-  max_attempts?: number;    // Max LLM attempts including error feedback (default 3)
-  commit_message?: string;  // Custom commit message template
+  max_attempts?: number; // Max LLM attempts including error feedback (default 3)
+  commit_message?: string; // Custom commit message template
   variables?: Record<string, string>; // Step-specific variables (merged with workflow vars)
 }
 
 export interface AutoWorkflow {
   name: string;
   description?: string;
-  target_dir: string;       // The project directory to modify
-  branch?: string;          // Create a feature branch (optional)
+  target_dir: string; // The project directory to modify
+  branch?: string; // Create a feature branch (optional)
   variables?: Record<string, string>;
   steps: AutoStep[];
   verify?: VerifyCommand[]; // Default verification for all steps
-  projectId?: string;       // Project ID — controls protected files, security scanning
+  projectId?: string; // Project ID — controls protected files, security scanning
 }
 
 export interface AutoStepResult {
   stepId: string;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
   attempts: number;
   filesWritten: string[];
   verificationPassed: boolean;
@@ -72,7 +72,7 @@ export interface AutoStepResult {
 export interface AutoExecutionResult {
   executionId: string;
   workflowName: string;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
   steps: AutoStepResult[];
   startedAt: string;
   completedAt: string;
@@ -93,9 +93,12 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
   /**
    * Load and parse an autonomous workflow YAML.
    */
-  async function loadWorkflow(workflowPath: string, basePath: string): Promise<AutoWorkflow> {
+  async function loadWorkflow(
+    workflowPath: string,
+    basePath: string,
+  ): Promise<AutoWorkflow> {
     const fullPath = resolve(basePath, workflowPath);
-    const raw = await readFile(fullPath, 'utf-8');
+    const raw = await readFile(fullPath, "utf-8");
     return parseYaml(raw) as AutoWorkflow;
   }
 
@@ -103,10 +106,13 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
    * Resolve variables in a prompt template.
    */
   function resolveVars(template: string, vars: Record<string, string>): string {
-    return template.replace(/\{\{(\s*[\w.]+\s*)\}\}/g, (_match, key: string) => {
-      const trimmed = key.trim();
-      return vars[trimmed] ?? `{{${trimmed}}}`;
-    });
+    return template.replace(
+      /\{\{(\s*[\w.]+\s*)\}\}/g,
+      (_match, key: string) => {
+        const trimmed = key.trim();
+        return vars[trimmed] ?? `{{${trimmed}}}`;
+      },
+    );
   }
 
   /**
@@ -115,10 +121,10 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
   async function loadPrompt(
     promptPath: string,
     basePath: string,
-    vars: Record<string, string>
+    vars: Record<string, string>,
   ): Promise<string> {
     const fullPath = resolve(basePath, promptPath);
-    const template = await readFile(fullPath, 'utf-8');
+    const template = await readFile(fullPath, "utf-8");
     return resolveVars(template, vars);
   }
 
@@ -129,19 +135,21 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
     step: AutoStep,
     workflow: AutoWorkflow,
     basePath: string,
-    prevOutputs: Record<string, string>
+    prevOutputs: Record<string, string>,
   ): Promise<AutoStepResult> {
     const start = Date.now();
     const maxAttempts = step.max_attempts ?? 3;
-    const agentName = step.agent ?? (step.useLite && liteAgent ? liteAgent : defaultAgent);
+    const agentName =
+      step.agent ?? (step.useLite && liteAgent ? liteAgent : defaultAgent);
     const adapter = adapters[agentName];
     const targetDir = resolve(basePath, workflow.target_dir);
-    const verifyCommands = step.verify ?? workflow.verify ?? defaultVerifyCommands();
+    const verifyCommands =
+      step.verify ?? workflow.verify ?? defaultVerifyCommands();
 
     if (!adapter) {
       return {
         stepId: step.id,
-        status: 'failed',
+        status: "failed",
         attempts: 0,
         filesWritten: [],
         verificationPassed: false,
@@ -172,35 +180,42 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
     }
 
     // Append cross-project reference context (injected by scheduler via variables)
-    const refContext = vars['reference_context'];
-    if (refContext && !basePrompt.includes('## Reference Context')) {
+    const refContext = vars["reference_context"];
+    if (refContext && !basePrompt.includes("## Reference Context")) {
       basePrompt += `\n\n${refContext}`;
     }
 
     // Inject Known Issues from the vision file so the LLM avoids repeating past mistakes
-    const knownIssues = vars['known_issues'];
+    const knownIssues = vars["known_issues"];
     if (knownIssues) {
       basePrompt += `\n\n## Known Issues (DO NOT REPEAT)\n\nThe following issues were caused by previous automated runs. You MUST avoid these patterns:\n\n${knownIssues}`;
     }
 
     // Inject escalation feedback from previous review if this is a re-queued task
-    const escalationReason = vars['previous_escalation_reason'];
-    if (escalationReason && escalationReason !== 'Escalated by merge pipeline') {
+    const escalationReason = vars["previous_escalation_reason"];
+    if (
+      escalationReason &&
+      escalationReason !== "Escalated by merge pipeline"
+    ) {
       basePrompt += `\n\n## Previous Attempt Review Feedback\n\nA previous attempt at this task was rejected by code review. You MUST address these concerns:\n\n${escalationReason}`;
     }
 
     let lastError: string | undefined;
     let filesWritten: string[] = [];
-    let lastLlmOutput = '';
+    let lastLlmOutput = "";
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      console.log(`\n  🤖 Attempt ${attempt}/${maxAttempts} (agent: ${agentName})`);
+      console.log(
+        `\n  🤖 Attempt ${attempt}/${maxAttempts} (agent: ${agentName})`,
+      );
 
       // Build the prompt — include error feedback on retry
       let prompt = basePrompt;
       if (attempt > 1 && lastError) {
         prompt += `\n\n## ⚠️ Previous Attempt Failed\n\nYour previous code had errors. Fix ALL of them:\n\n${lastError}`;
-        console.log(`  📋 Feeding ${lastError.split('\n').length} lines of error context`);
+        console.log(
+          `  📋 Feeding ${lastError.split("\n").length} lines of error context`,
+        );
       }
 
       // Call the LLM — enable codebase tools for agentic exploration
@@ -216,7 +231,7 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
       const response = await adapter.execute(request);
 
       if (!response.success || !response.output) {
-        lastError = response.error ?? 'LLM returned no output';
+        lastError = response.error ?? "LLM returned no output";
         console.log(`  ❌ LLM call failed: ${lastError}`);
         continue;
       }
@@ -230,7 +245,8 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
         console.log(`  ⚠️  No code blocks found in LLM output`);
         // If the LLM gave instructions but no code blocks, that might be the output
         // Store it and continue (don't count as error)
-        lastError = 'No code blocks with file paths found in output. Wrap code in ```language:path/to/file.ts blocks.';
+        lastError =
+          "No code blocks with file paths found in output. Wrap code in ```language:path/to/file.ts blocks.";
         continue;
       }
 
@@ -238,7 +254,8 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
 
       // Write files to the target project
       // Protected file list is project-specific (via protected-files-config)
-      const isOrchestrator = !workflow.projectId || workflow.projectId === 'orchestrator';
+      const isOrchestrator =
+        !workflow.projectId || workflow.projectId === "orchestrator";
       const writeResult = await writeFiles(changes, targetDir, {
         enforceProtected: isOrchestrator,
         projectId: workflow.projectId,
@@ -246,7 +263,7 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
       filesWritten = writeResult.filesWritten.map((f) => f.filePath);
 
       if (writeResult.errors.length > 0) {
-        console.log(`  ⚠️  Write errors: ${writeResult.errors.join(', ')}`);
+        console.log(`  ⚠️  Write errors: ${writeResult.errors.join(", ")}`);
       }
 
       // Run verification
@@ -265,7 +282,7 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
 
         return {
           stepId: step.id,
-          status: 'completed',
+          status: "completed",
           attempts: attempt,
           filesWritten,
           verificationPassed: true,
@@ -289,12 +306,12 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
     // All attempts exhausted
     return {
       stepId: step.id,
-      status: 'failed',
+      status: "failed",
       attempts: maxAttempts,
       filesWritten,
       verificationPassed: false,
       committed: false,
-      error: lastError ?? 'Max attempts reached',
+      error: lastError ?? "Max attempts reached",
       durationMs: Date.now() - start,
     };
   }
@@ -306,7 +323,7 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
     async run(
       workflowPath: string,
       basePath: string,
-      overrides?: Record<string, string>
+      overrides?: Record<string, string>,
     ): Promise<AutoExecutionResult> {
       const workflow = await loadWorkflow(workflowPath, basePath);
 
@@ -318,18 +335,23 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
       const startedAt = new Date().toISOString();
       const targetDir = resolve(basePath, workflow.target_dir);
 
-      console.log('\n' + '═'.repeat(50));
-      console.log('🔁 AUTONOMOUS MODE');
-      console.log('═'.repeat(50));
+      console.log("\n" + "═".repeat(50));
+      console.log("🔁 AUTONOMOUS MODE");
+      console.log("═".repeat(50));
       console.log(`  Workflow:  ${workflow.name}`);
       console.log(`  Execution: ${executionId.slice(0, 8)}`);
       console.log(`  Target:    ${targetDir}`);
-      console.log(`  Steps:     ${workflow.steps.map((s) => s.id).join(' → ')}`);
+      console.log(
+        `  Steps:     ${workflow.steps.map((s) => s.id).join(" → ")}`,
+      );
 
       // Create feature branch if specified
       let branch: string | undefined;
       if (workflow.branch) {
-        const branchName = resolveVars(workflow.branch, workflow.variables ?? {});
+        const branchName = resolveVars(
+          workflow.branch,
+          workflow.variables ?? {},
+        );
         const branchResult = await createBranch(targetDir, branchName);
         if (branchResult.success) {
           branch = branchName;
@@ -342,22 +364,24 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
         }
       }
 
-      console.log('═'.repeat(50) + '\n');
+      console.log("═".repeat(50) + "\n");
 
       const stepResults: AutoStepResult[] = [];
       const prevOutputs: Record<string, string> = {};
 
       for (const step of workflow.steps) {
-        console.log(`\n${'─'.repeat(50)}`);
+        console.log(`\n${"─".repeat(50)}`);
         console.log(`▶ Step: ${step.id}`);
-        console.log('─'.repeat(50));
+        console.log("─".repeat(50));
 
         const result = await executeStep(step, workflow, basePath, prevOutputs);
         stepResults.push(result);
 
-        if (result.status === 'completed') {
-          console.log(`\n  ✅ Step "${step.id}" completed in ${result.attempts} attempt(s)`);
-          console.log(`     Files: ${result.filesWritten.join(', ')}`);
+        if (result.status === "completed") {
+          console.log(
+            `\n  ✅ Step "${step.id}" completed in ${result.attempts} attempt(s)`,
+          );
+          console.log(`     Files: ${result.filesWritten.join(", ")}`);
           if (result.committed) {
             console.log(`     Commit: ${result.commitMessage}`);
           }
@@ -365,9 +389,11 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
           // Store output for next step (the files written)
           prevOutputs[step.id] = result.filesWritten
             .map((f) => `- ${f}`)
-            .join('\n');
+            .join("\n");
         } else {
-          console.log(`\n  ❌ Step "${step.id}" failed after ${result.attempts} attempt(s)`);
+          console.log(
+            `\n  ❌ Step "${step.id}" failed after ${result.attempts} attempt(s)`,
+          );
           console.log(`     Error: ${result.error}`);
 
           // Stop on failure
@@ -376,22 +402,26 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
       }
 
       const completedAt = new Date().toISOString();
-      const allPassed = stepResults.every((r) => r.status === 'completed');
+      const allPassed = stepResults.every((r) => r.status === "completed");
 
-      console.log('\n' + '═'.repeat(50));
-      console.log(allPassed ? '✅ WORKFLOW COMPLETED' : '❌ WORKFLOW FAILED');
-      console.log('═'.repeat(50));
-      console.log(`  Duration: ${Date.parse(completedAt) - Date.parse(startedAt)}ms`);
-      console.log(`  Steps: ${stepResults.filter((r) => r.status === 'completed').length}/${stepResults.length} passed`);
+      console.log("\n" + "═".repeat(50));
+      console.log(allPassed ? "✅ WORKFLOW COMPLETED" : "❌ WORKFLOW FAILED");
+      console.log("═".repeat(50));
+      console.log(
+        `  Duration: ${Date.parse(completedAt) - Date.parse(startedAt)}ms`,
+      );
+      console.log(
+        `  Steps: ${stepResults.filter((r) => r.status === "completed").length}/${stepResults.length} passed`,
+      );
       if (branch) {
         console.log(`  Branch: ${branch}`);
       }
-      console.log('═'.repeat(50) + '\n');
+      console.log("═".repeat(50) + "\n");
 
       return {
         executionId,
         workflowName: workflow.name,
-        status: allPassed ? 'completed' : 'failed',
+        status: allPassed ? "completed" : "failed",
         steps: stepResults,
         startedAt,
         completedAt,
@@ -400,4 +430,3 @@ export function createAutonomousRunner(deps: AutoRunnerDeps) {
     },
   };
 }
-
