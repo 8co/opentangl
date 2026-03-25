@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "@sinclair/typebox";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { resolve } from "path";
 
@@ -14,34 +14,49 @@ interface PluginConfig {
   timeout?: number;
 }
 
+/**
+ * Resolved binary: a fixed executable + zero or more base arguments.
+ * Stored as separate fields so they are passed as distinct argv elements
+ * to spawnSync — never concatenated into a shell string.
+ */
+interface ResolvedBin {
+  file: string;
+  baseArgs: string[];
+}
+
 function resolveWorkdir(config: PluginConfig): string {
-  return config.workdir
-    ? resolve(config.workdir)
-    : process.cwd();
+  return config.workdir ? resolve(config.workdir) : process.cwd();
 }
 
 /**
  * Resolve how to invoke the OpenTangl CLI.
- * Priority: explicit `bin` config → `opentangl` in PATH → `npx tsx src/cli.ts` in workdir.
+ * Priority: explicit `bin` config → `opentangl` in PATH → `npx tsx src/cli.ts` → `node dist/cli.js`.
+ *
+ * Returns a ResolvedBin so the file and arguments are never joined into a
+ * shell string and are safe to pass directly to spawnSync.
  */
-function resolveBin(config: PluginConfig, workdir: string): string {
-  if (config.bin) return config.bin;
+function resolveBin(config: PluginConfig, workdir: string): ResolvedBin {
+  if (config.bin) {
+    // config.bin is admin-controlled; split on the first space so users can
+    // supply e.g. "npx tsx" without introducing a shell invocation.
+    const [file, ...baseArgs] = config.bin.split(" ").filter(Boolean);
+    return { file, baseArgs };
+  }
 
-  try {
-    execSync("opentangl --version", { stdio: "ignore" });
-    return "opentangl";
-  } catch {
-    // not in PATH — fall back to source
+  // Try the installed opentangl binary first.
+  const probe = spawnSync("opentangl", ["--version"], { stdio: "ignore" });
+  if (probe.status === 0) {
+    return { file: "opentangl", baseArgs: [] };
   }
 
   const srcCli = resolve(workdir, "src", "cli.ts");
   if (existsSync(srcCli)) {
-    return `npx tsx ${srcCli}`;
+    return { file: "npx", baseArgs: ["tsx", srcCli] };
   }
 
   const distCli = resolve(workdir, "dist", "cli.js");
   if (existsSync(distCli)) {
-    return `node ${distCli}`;
+    return { file: "node", baseArgs: [distCli] };
   }
 
   throw new Error(
@@ -50,30 +65,88 @@ function resolveBin(config: PluginConfig, workdir: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// CLI runner
+// Input validation — defense-in-depth
 // ---------------------------------------------------------------------------
 
+/** Letters, digits, hyphens, underscores only. */
+const RE_IDENTIFIER = /^[a-zA-Z0-9_-]+$/;
+/** Comma-separated identifiers (project lists). */
+const RE_PROJECT_LIST = /^[a-zA-Z0-9_,-]+$/;
+/** var keys: letters, digits, underscores. */
+const RE_VAR_KEY = /^[a-zA-Z0-9_]+$/;
+
+function assertIdentifier(value: string, name: string): void {
+  if (!RE_IDENTIFIER.test(value)) {
+    throw new Error(
+      `Invalid ${name} "${value}": only letters, digits, hyphens and underscores are allowed.`
+    );
+  }
+}
+
+function assertProjectList(value: string, name: string): void {
+  if (!RE_PROJECT_LIST.test(value)) {
+    throw new Error(
+      `Invalid ${name} "${value}": expected comma-separated identifiers (letters, digits, hyphens, underscores).`
+    );
+  }
+}
+
+function assertWorkflowPath(value: string): void {
+  if (value.includes("..") || value.includes("\0")) {
+    throw new Error(`Invalid workflow path: path traversal is not allowed.`);
+  }
+}
+
+function assertVar(value: string): void {
+  const eq = value.indexOf("=");
+  if (eq <= 0) {
+    throw new Error(`Invalid var "${value}": expected key=value format.`);
+  }
+  const key = value.slice(0, eq);
+  if (!RE_VAR_KEY.test(key)) {
+    throw new Error(
+      `Invalid var key "${key}": only letters, digits, and underscores are allowed.`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CLI runner — no shell, no string concatenation
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute the OpenTangl CLI via spawnSync, bypassing the shell entirely.
+ * Each element of `args` is passed as a separate argv entry to the OS,
+ * so shell metacharacters in user-supplied values are never interpreted.
+ */
 function runCli(
   args: string[],
   workdir: string,
-  bin: string,
+  bin: ResolvedBin,
   timeout: number
 ): string {
-  const cmd = `${bin} ${args.join(" ")}`;
-  try {
-    return execSync(cmd, {
-      cwd: workdir,
-      encoding: "utf-8",
-      timeout,
-      env: { ...process.env },
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && "stdout" in err) {
-      const stdout = (err as NodeJS.ErrnoException & { stdout: string }).stdout;
-      if (stdout?.trim()) return stdout;
-    }
-    throw err;
+  const result = spawnSync(bin.file, [...bin.baseArgs, ...args], {
+    cwd: workdir,
+    encoding: "utf-8",
+    timeout,
+    env: { ...process.env },
+    // No `shell: true` — this is intentional and critical.
+  });
+
+  if (result.error) throw result.error;
+
+  const stdout = (result.stdout as string) ?? "";
+  const stderr = (result.stderr as string) ?? "";
+
+  if (result.status !== 0) {
+    // Surface stdout if the CLI wrote useful output before failing.
+    if (stdout.trim()) return stdout;
+    throw new Error(
+      stderr.trim() || `opentangl exited with code ${String(result.status)}`
+    );
   }
+
+  return stdout;
 }
 
 function ok(text: string) {
@@ -99,13 +172,13 @@ export default definePluginEntry({
     const workdir = resolveWorkdir(config);
     const timeout = config.timeout ?? 120_000;
 
-    let bin: string;
+    let bin: ResolvedBin;
     try {
       bin = resolveBin(config, workdir);
     } catch (err) {
-      // Log once at startup; tools will re-throw with a helpful message
+      // Log once at startup; individual tool calls will surface a clear error.
       console.error(`[opentangl] ${String(err)}`);
-      bin = "opentangl";
+      bin = { file: "opentangl", baseArgs: [] };
     }
 
     const run = (args: string[]) => runCli(args, workdir, bin, timeout);
@@ -189,11 +262,13 @@ export default definePluginEntry({
           ),
         }),
         async execute(_id, params) {
-          const args = ["propose", params["mode"] as string];
-          if (params["projects"]) args.push("--projects", params["projects"] as string);
-          if (params["featureRatio"] != null)
-            args.push("--feature-ratio", String(params["featureRatio"]));
           try {
+            const projects = params["projects"] as string | undefined;
+            if (projects) assertProjectList(projects, "projects");
+            const args = ["propose", params["mode"] as string];
+            if (projects) args.push("--projects", projects);
+            if (params["featureRatio"] != null)
+              args.push("--feature-ratio", String(params["featureRatio"]));
             return ok(run(args));
           } catch (err) {
             return fail(`Task proposal failed: ${String(err)}`);
@@ -232,12 +307,14 @@ export default definePluginEntry({
           ),
         }),
         async execute(_id, params) {
-          const args = ["autopilot"];
-          if (params["cycles"]) args.push("--cycles", String(params["cycles"]));
-          if (params["projects"]) args.push("--projects", params["projects"] as string);
-          if (params["featureRatio"] != null)
-            args.push("--feature-ratio", String(params["featureRatio"]));
           try {
+            const projects = params["projects"] as string | undefined;
+            if (projects) assertProjectList(projects, "projects");
+            const args = ["autopilot"];
+            if (params["cycles"]) args.push("--cycles", String(params["cycles"]));
+            if (projects) args.push("--projects", projects);
+            if (params["featureRatio"] != null)
+              args.push("--feature-ratio", String(params["featureRatio"]));
             return ok(run(args));
           } catch (err) {
             return fail(`Autopilot failed: ${String(err)}`);
@@ -283,13 +360,17 @@ export default definePluginEntry({
           ),
         }),
         async execute(_id, params) {
-          const mode = (params["mode"] as string) ?? "run";
-          const args = [mode, params["workflow"] as string];
-          if (params["project"]) args.push("--project", params["project"] as string);
-          for (const v of (params["vars"] as string[]) ?? []) {
-            args.push("--var", v);
-          }
           try {
+            const workflow = params["workflow"] as string;
+            const project = params["project"] as string | undefined;
+            const vars = (params["vars"] as string[]) ?? [];
+            assertWorkflowPath(workflow);
+            if (project) assertIdentifier(project, "project");
+            for (const v of vars) assertVar(v);
+            const mode = (params["mode"] as string) ?? "run";
+            const args = [mode, workflow];
+            if (project) args.push("--project", project);
+            for (const v of vars) args.push("--var", v);
             return ok(run(args));
           } catch (err) {
             return fail(`Workflow failed: ${String(err)}`);
@@ -312,9 +393,11 @@ export default definePluginEntry({
           ),
         }),
         async execute(_id, params) {
-          const args = ["next"];
-          if (params["project"]) args.push("--project", params["project"] as string);
           try {
+            const project = params["project"] as string | undefined;
+            if (project) assertIdentifier(project, "project");
+            const args = ["next"];
+            if (project) args.push("--project", project);
             return ok(run(args));
           } catch (err) {
             return fail(`Next task failed: ${String(err)}`);
@@ -336,9 +419,10 @@ export default definePluginEntry({
           }),
         }),
         async execute(_id, params) {
-          const args = ["wire", "--projects", params["projects"] as string];
           try {
-            return ok(run(args));
+            const projects = params["projects"] as string;
+            assertProjectList(projects, "projects");
+            return ok(run(["wire", "--projects", projects]));
           } catch (err) {
             return fail(`Wiring audit failed: ${String(err)}`);
           }
@@ -392,9 +476,10 @@ export default definePluginEntry({
           }),
         }),
         async execute(_id, params) {
-          const args = ["resume", params["executionId"] as string];
           try {
-            return ok(run(args));
+            const executionId = params["executionId"] as string;
+            assertIdentifier(executionId, "executionId");
+            return ok(run(["resume", executionId]));
           } catch (err) {
             return fail(`Resume failed: ${String(err)}`);
           }
