@@ -146,14 +146,14 @@ Then provide the appropriate template for the user to fill in:
 **For OpenAI:**
 ```
 OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-4.1
 DEFAULT_AGENT=openai
 ```
 
 **For Anthropic (Claude):**
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-opus-4-5
 DEFAULT_AGENT=anthropic
 ```
 
